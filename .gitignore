@@ -1,0 +1,40 @@
+# Build
+/target/
+backend/target/
+
+# Dependencies
+frontend/node_modules/
+
+# Build output
+frontend/dist/
+
+# Local uploads & logs
+uploads/
+logs/
+backend/uploads/
+backend/logs/
+
+# Environment & secrets — NEVER commit these
+.env
+.env.local
+.env.production
+.env.staging
+*.env
+application-local.yml
+application-local.yaml
+application-secret.yml
+application-secret.yaml
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Maven wrapper logs
+.mvn/wrapper/maven-wrapper.jar

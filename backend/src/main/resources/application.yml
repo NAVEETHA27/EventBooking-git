@@ -1,0 +1,127 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+spring:
+  application:
+    name: event-booking-system
+
+  # ── MySQL ─────────────────────────────────────────────────────────────────
+  datasource:
+    url: jdbc:mysql://localhost:3306/event_booking_db?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    username: root
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+
+  # ── JPA / Hibernate ───────────────────────────────────────────────────────
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+    open-in-view: false
+
+  # ── MongoDB ───────────────────────────────────────────────────────────────
+  # Set MONGODB_ENABLED=true only when MongoDB is available.
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/event_booking_logs}
+      auto-index-creation: false
+
+  # ── Mail (SMTP) ───────────────────────────────────────────────────────────
+  # Set MAIL_USERNAME and MAIL_PASSWORD before starting.
+  # Gmail: use a 16-char App Password (Google Account → Security → App Passwords).
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+    default-encoding: UTF-8
+    test-connection: false
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          connectiontimeout: 10000
+          timeout: 10000
+          writetimeout: 10000
+
+  # ── File Upload ───────────────────────────────────────────────────────────
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+# ── MongoDB feature flag ──────────────────────────────────────────────────
+mongodb:
+  enabled: ${MONGODB_ENABLED:false}
+
+# ── JWT ───────────────────────────────────────────────────────────────────
+jwt:
+  secret: ${JWT_SECRET}
+  expiration: 900000
+  refresh-expiration: 604800000
+  issuer: college-events
+
+# ── Razorpay ──────────────────────────────────────────────────────────────
+razorpay:
+  key-id: ${RAZORPAY_KEY_ID}
+  key-secret: ${RAZORPAY_KEY_SECRET}
+  currency: ${RAZORPAY_CURRENCY:INR}
+
+# ── App ───────────────────────────────────────────────────────────────────
+app:
+  upload:
+    dir: uploads
+    base-url: ${APP_BASE_URL:http://localhost:8080}
+  frontend:
+    url: ${FRONTEND_URL:http://localhost:3000}
+
+# ── AI ────────────────────────────────────────────────────────────────────
+ai:
+  provider: ${AI_PROVIDER:openai}
+  openai:
+    api-key: ${OPENAI_API_KEY:}
+    model: ${OPENAI_MODEL:gpt-4o-mini}
+    endpoint: ${OPENAI_ENDPOINT:https://api.openai.com/v1/chat/completions}
+  gemini:
+    api-key: ${GEMINI_API_KEY:}
+    model: ${GEMINI_MODEL:gemini-1.5-flash}
+
+# ── Logging ───────────────────────────────────────────────────────────────
+logging:
+  level:
+    com.eventbooking: DEBUG
+    org.springframework.security: INFO
+    org.hibernate.SQL: INFO
+    org.mongodb.driver.cluster: WARN
+    org.mongodb.driver.connection: WARN
+    org.mongodb.driver: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/event-booking.log
+
+# ── Actuator ──────────────────────────────────────────────────────────────
+management:
+  health:
+    mongo:
+      enabled: ${MONGODB_ENABLED:false}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
