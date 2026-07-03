@@ -29,16 +29,16 @@ spring:
         format_sql: true
     open-in-view: false
 
-  # ── MongoDB ───────────────────────────────────────────────────────────────
-  # Set MONGODB_ENABLED=true only when MongoDB is available.
+  # ── MongoDB (optional) ────────────────────────────────────────────────────
+  # Set MONGODB_ENABLED=true only when MongoDB is running.
   data:
     mongodb:
       uri: ${MONGODB_URI:mongodb://localhost:27017/event_booking_logs}
       auto-index-creation: false
 
   # ── Mail (SMTP) ───────────────────────────────────────────────────────────
-  # Set MAIL_USERNAME and MAIL_PASSWORD before starting.
-  # Gmail: use a 16-char App Password (Google Account → Security → App Passwords).
+  # Gmail: create a 16-char App Password at
+  # Google Account → Security → 2-Step Verification → App Passwords
   mail:
     host: smtp.gmail.com
     port: 587
@@ -75,6 +75,7 @@ jwt:
   issuer: college-events
 
 # ── Razorpay ──────────────────────────────────────────────────────────────
+# Get test keys from https://dashboard.razorpay.com/app/keys
 razorpay:
   key-id: ${RAZORPAY_KEY_ID}
   key-secret: ${RAZORPAY_KEY_SECRET}
@@ -88,7 +89,7 @@ app:
   frontend:
     url: ${FRONTEND_URL:http://localhost:3000}
 
-# ── AI ────────────────────────────────────────────────────────────────────
+# ── AI Providers ──────────────────────────────────────────────────────────
 ai:
   provider: ${AI_PROVIDER:openai}
   openai:
