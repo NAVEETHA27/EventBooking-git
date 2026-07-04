@@ -12,7 +12,7 @@ spring:
     url: jdbc:mysql://localhost:3306/event_booking_db?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
     username: root
     # Set DB_PASSWORD env var in production; local profile overrides this.
-    password: ${DB_PASSWORD:}
+    password: ${DB_PASSWORD:@navii27}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       maximum-pool-size: 10
@@ -67,7 +67,8 @@ mongodb:
 
 # ── JWT ───────────────────────────────────────────────────────────────────
 jwt:
-  secret: ${JWT_SECRET:}
+  # Minimum 32 chars required by JJWT. Override via JWT_SECRET env var or local profile.
+  secret: ${JWT_SECRET:this-is-a-safe-default-key-for-dev-only-not-for-prod}
   expiration: 900000
   refresh-expiration: 604800000
   issuer: college-events
