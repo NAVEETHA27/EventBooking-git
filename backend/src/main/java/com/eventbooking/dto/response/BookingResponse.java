@@ -16,6 +16,12 @@ public class BookingResponse {
     private BigDecimal totalAmount;
     private Booking.BookingStatus bookingStatus;
     private Booking.TicketStatus ticketStatus;
+    private Booking.AttendanceStatus attendanceStatus;
+    private LocalDateTime checkInTime;
+    private Long checkedInBy;
+    private boolean certificateEligible;
+    private String certificateId;
+    private String certificateStatus;
     private String qrCodePath;
     private LocalDateTime bookedAt;
     private LocalDateTime cancelledAt;
@@ -31,6 +37,7 @@ public class BookingResponse {
     public static class EventInfo {
         private Long id;
         private String eventName;
+        private String status;
         private String eventDate;
         private String eventTime;
         private String location;

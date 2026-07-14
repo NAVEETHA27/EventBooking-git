@@ -1,9 +1,7 @@
 package com.eventbooking.config;
 
-import com.mongodb.MongoClientSettings;
 import com.mongodb.connection.ClusterSettings;
 import com.mongodb.connection.SocketSettings;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.mongo.MongoClientSettingsBuilderCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -11,18 +9,17 @@ import org.springframework.context.annotation.Configuration;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Configures aggressive MongoDB connection timeouts so that:
- *   1. If MongoDB is running    → connects normally.
- *   2. If MongoDB is NOT running → fails fast (2 s) instead of hanging 30 s.
+ * Configures aggressive MongoDB connection timeouts.
  *
- * Without this, the background monitor thread keeps retrying and the first
- * request that touches a Mongo repo throws MongoTimeoutException after a
- * long wait, degrading the user experience even though we handle the error.
+ * Applied ALWAYS (regardless of mongodb.enabled) so that if MongoDB is not
+ * running, the Spring Boot autoconfigured MongoClient fails fast (2 s)
+ * instead of blocking every request for 30 s.
  *
- * Only active when mongodb.enabled=true (the default).
+ * Without this, even when mongodb.enabled=false the MongoClient still gets
+ * autoconfigured from spring.data.mongodb.uri and its 30-second server
+ * selection timeout causes login and other requests to hang.
  */
 @Configuration
-@ConditionalOnProperty(name = "mongodb.enabled", havingValue = "true")
 public class MongoHealthConfig {
 
     @Bean

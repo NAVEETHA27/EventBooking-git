@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import api, { bookingsAPI, eventsAPI, notificationsAPI, organizerAPI, userAPI } from '../services/api';
 import { toast } from 'react-toastify';
 import { queryClient } from '../main';
@@ -43,10 +43,90 @@ async function refreshAuthenticatedData(info) {
   await queryClient.invalidateQueries();
 }
 
+// ── Session helpers ───────────────────────────────────────────────────────────
+
+/** Parse JWT payload without a library */
+function parseJwtExpiry(token) {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return payload.exp ? payload.exp * 1000 : null; // convert to ms
+  } catch {
+    return null;
+  }
+}
+
+/** Read expiresAt from localStorage (set on login/refresh) */
+function storedExpiresAt() {
+  const v = localStorage.getItem('eb_expires_at');
+  return v ? parseInt(v, 10) : null;
+}
+
+// ── Provider ──────────────────────────────────────────────────────────────────
+
 export function AuthProvider({ children }) {
   const [user, setUser]       = useState(null);
   const [loading, setLoading] = useState(true);
+  const logoutTimerRef        = useRef(null);
+  const warnTimerRef          = useRef(null);
 
+  // ── Schedule auto-logout ───────────────────────────────────────────────────
+  const scheduleAutoLogout = useCallback((expiresAt, logoutFn) => {
+    // Clear any existing timers
+    clearTimeout(logoutTimerRef.current);
+    clearTimeout(warnTimerRef.current);
+
+    const now = Date.now();
+    const msUntilExpiry = expiresAt - now;
+
+    if (msUntilExpiry <= 0) {
+      logoutFn(true);
+      return;
+    }
+
+    // Warn 2 minutes before expiry
+    const warnAt = msUntilExpiry - 2 * 60 * 1000;
+    if (warnAt > 0) {
+      warnTimerRef.current = setTimeout(() => {
+        toast.warn('⏳ Your session expires in 2 minutes. Any activity will extend it automatically.', {
+          toastId: 'session-expiry-warn',
+          autoClose: 10000,
+        });
+      }, warnAt);
+    }
+
+    // Hard logout at expiry
+    logoutTimerRef.current = setTimeout(() => {
+      logoutFn(true); // true = "expired" flag
+    }, msUntilExpiry);
+  }, []);
+
+  // ── Logout ─────────────────────────────────────────────────────────────────
+  const logout = useCallback((expired = false) => {
+    clearTimeout(logoutTimerRef.current);
+    clearTimeout(warnTimerRef.current);
+
+    localStorage.removeItem('eb_token');
+    localStorage.removeItem('eb_user');
+    localStorage.removeItem('eb_refresh_token');
+    localStorage.removeItem('eb_expires_at');
+    delete api.defaults.headers.common['Authorization'];
+    setUser(null);
+    queryClient.clear();
+    resetChatSession();
+
+    if (expired) {
+      toast.error('🔒 Your session has expired. Please sign in again.', {
+        toastId: 'session-expired',
+        autoClose: 5000,
+      });
+      // Small delay so toast renders before redirect
+      setTimeout(() => { window.location.href = '/login'; }, 500);
+    } else {
+      toast.info('Signed out successfully.');
+    }
+  }, []);
+
+  // ── Restore session on mount ───────────────────────────────────────────────
   useEffect(() => {
     try {
       const stored = localStorage.getItem('eb_user');
@@ -54,8 +134,20 @@ export function AuthProvider({ children }) {
       if (stored && token) {
         const parsed = JSON.parse(stored);
         if (parsed?.email) {
-          setUser(parsed);
-          api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+          // Check if token is already expired
+          const expiresAt = storedExpiresAt() || parseJwtExpiry(token);
+          if (expiresAt && Date.now() >= expiresAt) {
+            // Token expired while app was closed — clear and don't restore
+            localStorage.removeItem('eb_token');
+            localStorage.removeItem('eb_user');
+            localStorage.removeItem('eb_refresh_token');
+            localStorage.removeItem('eb_expires_at');
+          } else {
+            setUser(parsed);
+            api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+            // Re-arm the auto-logout timer for remaining session time
+            if (expiresAt) scheduleAutoLogout(expiresAt, logout);
+          }
         }
       }
     } catch {
@@ -64,40 +156,47 @@ export function AuthProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [scheduleAutoLogout, logout]);
 
+  // ── Listen for token refresh from api.js interceptor ─────────────────────
+  // When the axios interceptor silently refreshes the token it fires this event
+  useEffect(() => {
+    const handler = (e) => {
+      const { expiresAt } = e.detail || {};
+      if (expiresAt) scheduleAutoLogout(expiresAt, logout);
+    };
+    window.addEventListener('eb:token-refreshed', handler);
+    return () => window.removeEventListener('eb:token-refreshed', handler);
+  }, [scheduleAutoLogout, logout]);
+
+  // ── Login ──────────────────────────────────────────────────────────────────
   const login = useCallback((authResponse) => {
-    const { accessToken, refreshToken, user: info } = authResponse;
+    const { accessToken, refreshToken, user: info, expiresIn, expiresAt: serverExpiresAt } = authResponse;
 
-    // Persist tokens
+    // Compute absolute expiry — prefer server-provided value, fall back to JWT claim
+    const expiresAt = serverExpiresAt
+      || (expiresIn ? Date.now() + expiresIn : null)
+      || parseJwtExpiry(accessToken);
+
     localStorage.setItem('eb_token', accessToken);
     localStorage.setItem('eb_user', JSON.stringify(info));
     if (refreshToken) localStorage.setItem('eb_refresh_token', refreshToken);
+    if (expiresAt)    localStorage.setItem('eb_expires_at', String(expiresAt));
+
     api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
     setUser(info);
+
+    // Arm auto-logout timer
+    if (expiresAt) scheduleAutoLogout(expiresAt, logout);
 
     refreshAuthenticatedData(info).catch((err) => {
       console.warn('Could not prefetch fresh session data', err);
       queryClient.invalidateQueries();
     });
     resetChatSession();
-  }, []);
+  }, [scheduleAutoLogout, logout]);
 
-  const logout = useCallback(() => {
-    localStorage.removeItem('eb_token');
-    localStorage.removeItem('eb_user');
-    localStorage.removeItem('eb_refresh_token');
-    delete api.defaults.headers.common['Authorization'];
-    setUser(null);
-
-    // Clear all cached query data so stale user data is never shown
-    queryClient.clear();
-
-    resetChatSession();
-
-    toast.info('Signed out successfully.');
-  }, []);
-
+  // ── updateUser ─────────────────────────────────────────────────────────────
   const updateUser = useCallback((updates) => {
     setUser(prev => {
       const next = { ...prev, ...updates };

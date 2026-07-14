@@ -30,10 +30,11 @@ export default function OrganizerDashboard() {
   const { user } = useAuth();
 
   const { data: dashboard, isLoading: dLoading } = useQuery('org-dash',
-    () => organizerAPI.getDashboard().then((r) => r.data?.data), { retry: 1 });
+    () => organizerAPI.getDashboard({ silent: true }).then((r) => r.data?.data), { retry: 0 });
 
   const { data: events, isLoading: eLoading } = useQuery('org-events-dash',
-    () => eventsAPI.myEvents({ page: 0, size: 6 }).then((r) => r.data?.data), { retry: 1 });
+    () => eventsAPI.myEvents({ page: 0, size: 6 }, { silent: true }).then((r) => r.data?.data),
+    { retry: 0 });
 
   const eventList = events?.content ?? [];
   const chartData = (dashboard?.analyticsLast30Days ?? []).map((item) => ({
@@ -42,14 +43,24 @@ export default function OrganizerDashboard() {
     bookings: Number(item.totalBookings ?? 0),
   }));
 
+  const totalEvents = dashboard?.totalEvents ?? events?.totalElements ?? eventList.length;
+  const totalRevenue = dashboard?.totalRevenue ?? eventList.reduce((sum, event) => {
+    const soldSeats = Math.max(0, Number(event.totalSeats ?? 0) - Number(event.availableSeats ?? 0));
+    return sum + soldSeats * Number(event.ticketPrice ?? 0);
+  }, 0);
+  const totalAttendees = eventList.reduce((sum, event) => {
+    const soldSeats = Math.max(0, Number(event.totalSeats ?? 0) - Number(event.availableSeats ?? 0));
+    return sum + soldSeats;
+  }, 0);
+
   const stats = [
-    { label: 'Total Events', value: dashboard?.totalEvents ?? 0, icon: <FiCalendar />, cls: 'text-blue-600 bg-blue-50 border-blue-100' },
-    { label: 'Total Revenue', value: `Rs. ${Number(dashboard?.totalRevenue ?? 0).toLocaleString()}`, icon: <FiDollarSign />, cls: 'text-green-600 bg-green-50 border-green-100' },
+    { label: 'Total Events', value: totalEvents, icon: <FiCalendar />, cls: 'text-blue-600 bg-blue-50 border-blue-100' },
+    { label: 'Total Revenue', value: `Rs. ${Number(totalRevenue ?? 0).toLocaleString()}`, icon: <FiDollarSign />, cls: 'text-green-600 bg-green-50 border-green-100' },
     { label: 'Active Events', value: eventList.filter((event) => event.status === 'PUBLISHED').length, icon: <FiTrendingUp />, cls: 'text-violet-600 bg-violet-50 border-violet-100' },
-    { label: 'Total Attendees', value: eventList.reduce((sum, event) => sum + (event.totalSeats - event.availableSeats), 0), icon: <FiUsers />, cls: 'text-amber-600 bg-amber-50 border-amber-100' },
+    { label: 'Total Attendees', value: totalAttendees, icon: <FiUsers />, cls: 'text-amber-600 bg-amber-50 border-amber-100' },
   ];
 
-  if (dLoading || eLoading) return <Spinner full />;
+  if (eLoading || (dLoading && !events)) return <Spinner full />;
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-10 sm:px-6 lg:px-8">

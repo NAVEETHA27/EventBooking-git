@@ -6,6 +6,8 @@ import com.eventbooking.dto.response.EventResponse;
 import com.eventbooking.dto.response.PagedResponse;
 import com.eventbooking.exception.ResourceNotFoundException;
 import com.eventbooking.exception.UnauthorizedException;
+import com.eventbooking.dto.request.CertificateSettingsRequest;
+import com.eventbooking.entity.CertificateSettings;
 import com.eventbooking.entity.Event;
 import com.eventbooking.entity.Organizer;
 import com.eventbooking.entity.ApprovalRequest;
@@ -43,6 +45,7 @@ public class EventService {
     private final EmailService              emailService;
     private final AuditService              auditService;
     private final EventMapper               eventMapper;
+    private final StorageService            storageService;
 
     /** Optional — null when MongoDB is disabled/unavailable */
     private final Optional<SearchHistoryRepository> searchHistoryRepository;
@@ -56,6 +59,7 @@ public class EventService {
             EmailService emailService,
             AuditService auditService,
             EventMapper eventMapper,
+            StorageService storageService,
             @Autowired(required = false) SearchHistoryRepository searchHistoryRepository) {
         this.eventRepository           = eventRepository;
         this.organizerRepository       = organizerRepository;
@@ -64,12 +68,14 @@ public class EventService {
         this.emailService              = emailService;
         this.auditService              = auditService;
         this.eventMapper               = eventMapper;
+        this.storageService            = storageService;
         this.searchHistoryRepository   = Optional.ofNullable(searchHistoryRepository);
     }
 
     // ─── CREATE ───────────────────────────────────────────────────────────
 
     @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "recommendations", allEntries = true)
     public EventResponse createEvent(Long organizerId, EventRequest req) {
         Organizer organizer = organizerRepository.findById(organizerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Organizer not found"));
@@ -90,71 +96,232 @@ public class EventService {
                 .venueName(req.getVenueName())
                 .location(req.getLocation())
                 .googleMapsUrl(req.getGoogleMapsUrl())
+                .whatsappGroupLink(req.getWhatsappGroupLink())
+                .whatsappContactNumber(req.getWhatsappContactNumber())
+                .venueLatitude(req.getVenueLatitude())
+                .venueLongitude(req.getVenueLongitude())
                 .ticketPrice(req.getTicketPrice())
                 .totalSeats(req.getTotalSeats())
                 .availableSeats(req.getTotalSeats())
-                .status(Event.EventStatus.PENDING_APPROVAL)
+                .status(Event.EventStatus.PUBLISHED)
                 .visibility(req.getVisibility())
                 .tags(req.getTags())
                 .organizerDetails(req.getOrganizerDetails())
                 .authorizedDocumentUrl(req.getAuthorizedDocumentUrl())
-                .hasCertificate(req.isHasCertificate())
+                .hasCertificate(Boolean.TRUE.equals(req.getHasCertificate()))
+                .foodProvided(Boolean.TRUE.equals(req.getFoodProvided()))
+                .foodMeals(req.getFoodMeals())
+                .foodType(req.getFoodType())
+                .teaCoffeeProvided(Boolean.TRUE.equals(req.getTeaCoffeeProvided()))
+                .specialDiet(req.getSpecialDiet())
+                .accommodationProvided(Boolean.TRUE.equals(req.getAccommodationProvided()))
+                .accommodationType(req.getAccommodationType())
+                .accommodationCharges(req.getAccommodationCharges())
+                .accommodationBedsAvailable(req.getAccommodationBedsAvailable())
+                .accommodationDetails(req.getAccommodationDetails())
+                .boysHostelAvailable(Boolean.TRUE.equals(req.getBoysHostelAvailable()))
+                .girlsHostelAvailable(Boolean.TRUE.equals(req.getGirlsHostelAvailable()))
+                .hotelTieupAvailable(Boolean.TRUE.equals(req.getHotelTieupAvailable()))
+                .accommodationCheckIn(req.getAccommodationCheckIn())
+                .accommodationCheckOut(req.getAccommodationCheckOut())
+                .accommodationContactPerson(req.getAccommodationContactPerson())
+                .nearestBusStop(req.getNearestBusStop())
+                .distanceFromBusStop(req.getDistanceFromBusStop())
+                .busNumbers(req.getBusNumbers())
+                .nearestRailwayStation(req.getNearestRailwayStation())
+                .distanceFromRailwayStation(req.getDistanceFromRailwayStation())
+                .nearestAirport(req.getNearestAirport())
+                .metroInformation(req.getMetroInformation())
+                .landmarks(req.getLandmarks())
+                .parkingAvailable(req.getParkingAvailable())
+                .travelGuide(req.getTravelGuide())
+                .estimatedTravelTime(req.getEstimatedTravelTime())
+                .cabEstimate(req.getCabEstimate())
+                .nearbyHotels(req.getNearbyHotels())
+                .nearbyRestaurants(req.getNearbyRestaurants())
+                .emergencyContacts(req.getEmergencyContacts())
+                .sessionSchedule(req.getSessionSchedule())
+                .speakerList(req.getSpeakerList())
+                .liveAnnouncements(req.getLiveAnnouncements())
+                .reportingTime(req.getReportingTime())
+                .dressCode(req.getDressCode())
+                .itemsToBring(req.getItemsToBring())
+                .laptopRequired(Boolean.TRUE.equals(req.getLaptopRequired()))
+                .idCardRequired(Boolean.TRUE.equals(req.getIdCardRequired()))
+                .teamSize(req.getTeamSize())
+                .rules(req.getRules())
+                .refundPolicy(req.getRefundPolicy())
+                .cancellationPolicy(req.getCancellationPolicy())
+                .certificateEligibility(req.getCertificateEligibility())
+                .wifiAvailable(Boolean.TRUE.equals(req.getWifiAvailable()))
+                .wheelchairAccessible(false)
+                .restRoomsAvailable(false)
+                .drinkingWaterAvailable(false)
+                .medicalSupportAvailable(Boolean.TRUE.equals(req.getMedicalSupportAvailable()))
+                .networkingEnabled(false)
                 .build();
 
         event = eventRepository.save(event);
-        approvalRequestRepository.save(ApprovalRequest.builder()
+        applyCertificateSettings(event, req.getCertificateSettings(), organizer);
+        event = eventRepository.save(event);
+
+        // Auto-approve: create an approved ApprovalRequest so no admin action is needed
+        ApprovalRequest autoApproval = ApprovalRequest.builder()
                 .event(event)
                 .organizer(organizer)
-                .status(ApprovalRequest.ApprovalStatus.PENDING)
-                .build());
+                .status(ApprovalRequest.ApprovalStatus.APPROVED)
+                .reviewNote("Auto-approved on creation")
+                .build();
+        approvalRequestRepository.save(autoApproval);
+
         auditService.record(organizerId, "ORGANIZER", "EVENT_CREATED", "EVENT",
-                String.valueOf(event.getId()), "Event submitted for approval");
-        log.info("Event created: {} by organizer {}", event.getId(), organizerId);
+                String.valueOf(event.getId()), "Event created and auto-approved");
+        log.info("Event created and auto-approved: {} by organizer {}", event.getId(), organizerId);
         return toResponse(event);
     }
 
     // ─── UPDATE ───────────────────────────────────────────────────────────
 
     @Transactional
+    @org.springframework.cache.annotation.Caching(evict = {
+            @org.springframework.cache.annotation.CacheEvict(value = "eventCatalog", key = "#eventId"),
+            @org.springframework.cache.annotation.CacheEvict(value = "recommendations", allEntries = true)
+    })
     public EventResponse updateEvent(Long eventId, Long organizerId, EventRequest req) {
         Event event = getOwnedEvent(eventId, organizerId);
-        event.setEventName(req.getEventName());
+        long confirmedBookings = eventRepository.countConfirmedBookings(event.getId());
+        boolean hasRegistrations = confirmedBookings > 0
+                || event.getAvailableSeats() < event.getTotalSeats();
+        boolean published = List.of(
+                Event.EventStatus.PUBLISHED,
+                Event.EventStatus.UPCOMING,
+                Event.EventStatus.LIVE,
+                Event.EventStatus.ONGOING
+        ).contains(event.getStatus());
+        if (!published) {
+            event.setEventName(req.getEventName());
+            event.setCategory(req.getCategory());
+            event.setEventType(req.getEventType());
+            event.setCollegeName(req.getCollegeName());
+            event.setDepartmentName(req.getDepartmentName());
+            event.setEventDate(req.getEventDate());
+            event.setEventTime(req.getEventTime());
+            event.setEndDate(req.getEndDate());
+            event.setEndTime(req.getEndTime());
+            event.setRegistrationDeadline(req.getRegistrationDeadline());
+            event.setVenueName(req.getVenueName());
+            event.setLocation(req.getLocation());
+            event.setGoogleMapsUrl(req.getGoogleMapsUrl());
+            event.setTicketPrice(req.getTicketPrice());
+            event.setVisibility(req.getVisibility());
+            event.setTotalSeats(req.getTotalSeats());
+            event.setAvailableSeats(req.getTotalSeats());
+        } else if (!hasRegistrations && req.getEventDate() != null) {
+            event.setEventDate(req.getEventDate());
+            event.setEventTime(req.getEventTime());
+            event.setEndDate(req.getEndDate());
+            event.setEndTime(req.getEndTime());
+            event.setRegistrationDeadline(req.getRegistrationDeadline());
+        }
         event.setDescription(req.getDescription());
-        event.setCategory(req.getCategory());
-        event.setEventType(req.getEventType());
-        event.setCollegeName(req.getCollegeName());
-        event.setDepartmentName(req.getDepartmentName());
-        event.setEventDate(req.getEventDate());
-        event.setEventTime(req.getEventTime());
-        event.setEndDate(req.getEndDate());
-        event.setEndTime(req.getEndTime());
-        event.setRegistrationDeadline(req.getRegistrationDeadline());
-        event.setVenueName(req.getVenueName());
-        event.setLocation(req.getLocation());
-        event.setGoogleMapsUrl(req.getGoogleMapsUrl());
-        event.setTicketPrice(req.getTicketPrice());
+        event.setWhatsappGroupLink(req.getWhatsappGroupLink());
+        event.setWhatsappContactNumber(req.getWhatsappContactNumber());
         event.setTags(req.getTags());
         event.setOrganizerDetails(req.getOrganizerDetails());
         if (StringUtils.hasText(req.getAuthorizedDocumentUrl())) {
             event.setAuthorizedDocumentUrl(req.getAuthorizedDocumentUrl());
         }
-        event.setHasCertificate(req.isHasCertificate());
-        event.setStatus(Event.EventStatus.PENDING_APPROVAL);
-        event.setVisibility(req.getVisibility());
-        approvalRequestRepository.save(ApprovalRequest.builder()
-                .event(event)
-                .organizer(event.getOrganizer())
-                .status(ApprovalRequest.ApprovalStatus.PENDING)
-                .build());
+        if (!published) {
+            event.setHasCertificate(Boolean.TRUE.equals(req.getHasCertificate()));
+        }
+
+        // Coordinates & Travel Info
+        event.setVenueLatitude(req.getVenueLatitude());
+        event.setVenueLongitude(req.getVenueLongitude());
+        event.setNearestBusStop(req.getNearestBusStop());
+        event.setDistanceFromBusStop(req.getDistanceFromBusStop());
+        event.setBusNumbers(req.getBusNumbers());
+        event.setNearestRailwayStation(req.getNearestRailwayStation());
+        event.setDistanceFromRailwayStation(req.getDistanceFromRailwayStation());
+        event.setNearestAirport(req.getNearestAirport());
+        event.setMetroInformation(req.getMetroInformation());
+        event.setLandmarks(req.getLandmarks());
+        event.setParkingAvailable(req.getParkingAvailable());
+        event.setTravelGuide(req.getTravelGuide());
+        event.setEstimatedTravelTime(req.getEstimatedTravelTime());
+        event.setCabEstimate(req.getCabEstimate());
+        event.setNearbyHotels(req.getNearbyHotels());
+        event.setNearbyRestaurants(req.getNearbyRestaurants());
+        event.setEmergencyContacts(req.getEmergencyContacts());
+        event.setSessionSchedule(req.getSessionSchedule());
+        event.setSpeakerList(req.getSpeakerList());
+        event.setLiveAnnouncements(req.getLiveAnnouncements());
+
+        // Food & Accommodation
+        event.setFoodProvided(Boolean.TRUE.equals(req.getFoodProvided()));
+        event.setFoodMeals(req.getFoodMeals());
+        event.setFoodType(req.getFoodType());
+        event.setTeaCoffeeProvided(Boolean.TRUE.equals(req.getTeaCoffeeProvided()));
+        event.setSpecialDiet(req.getSpecialDiet());
+        event.setAccommodationProvided(Boolean.TRUE.equals(req.getAccommodationProvided()));
+        event.setAccommodationType(req.getAccommodationType());
+        event.setAccommodationCharges(req.getAccommodationCharges());
+        event.setAccommodationBedsAvailable(req.getAccommodationBedsAvailable());
+        event.setAccommodationDetails(req.getAccommodationDetails());
+        event.setBoysHostelAvailable(Boolean.TRUE.equals(req.getBoysHostelAvailable()));
+        event.setGirlsHostelAvailable(Boolean.TRUE.equals(req.getGirlsHostelAvailable()));
+        event.setHotelTieupAvailable(Boolean.TRUE.equals(req.getHotelTieupAvailable()));
+        event.setAccommodationCheckIn(req.getAccommodationCheckIn());
+        event.setAccommodationCheckOut(req.getAccommodationCheckOut());
+        event.setAccommodationContactPerson(req.getAccommodationContactPerson());
+
+        // Important Information & Facilities
+        event.setReportingTime(req.getReportingTime());
+        event.setDressCode(req.getDressCode());
+        event.setItemsToBring(req.getItemsToBring());
+        event.setLaptopRequired(Boolean.TRUE.equals(req.getLaptopRequired()));
+        event.setIdCardRequired(Boolean.TRUE.equals(req.getIdCardRequired()));
+        event.setTeamSize(req.getTeamSize());
+        event.setRules(req.getRules());
+        event.setRefundPolicy(req.getRefundPolicy());
+        event.setCancellationPolicy(req.getCancellationPolicy());
+        event.setCertificateEligibility(req.getCertificateEligibility());
+        event.setWifiAvailable(Boolean.TRUE.equals(req.getWifiAvailable()));
+        event.setWheelchairAccessible(false);
+        event.setRestRoomsAvailable(false);
+        event.setDrinkingWaterAvailable(false);
+        event.setMedicalSupportAvailable(Boolean.TRUE.equals(req.getMedicalSupportAvailable()));
+        event.setNetworkingEnabled(false);
+        if (!published) {
+            applyCertificateSettings(event, req.getCertificateSettings(), event.getOrganizer());
+        }
+
+        // Auto-approve on re-edit after rejection
+        if (event.getStatus() == Event.EventStatus.REJECTED) {
+            event.setStatus(Event.EventStatus.PUBLISHED);
+            ApprovalRequest reApproval = approvalRequestRepository
+                    .findFirstByEventIdOrderByRequestedAtDesc(event.getId())
+                    .orElseGet(() -> ApprovalRequest.builder()
+                            .event(event)
+                            .organizer(event.getOrganizer())
+                            .build());
+            reApproval.setStatus(ApprovalRequest.ApprovalStatus.APPROVED);
+            reApproval.setReviewNote("Auto-approved after organizer re-submission");
+            approvalRequestRepository.save(reApproval);
+        }
         notificationService.notifyEventUpdate(event);
         auditService.record(organizerId, "ORGANIZER", "EVENT_EDITED", "EVENT",
-                String.valueOf(event.getId()), "Event edited and resubmitted");
+                String.valueOf(event.getId()), "Event edited and auto-approved");
         return toResponse(eventRepository.save(event));
     }
 
     // ─── DELETE ───────────────────────────────────────────────────────────
 
     @Transactional
+    @org.springframework.cache.annotation.Caching(evict = {
+            @org.springframework.cache.annotation.CacheEvict(value = "eventCatalog", key = "#eventId"),
+            @org.springframework.cache.annotation.CacheEvict(value = "recommendations", allEntries = true)
+    })
     public void deleteEvent(Long eventId, Long organizerId) {
         Event event = getOwnedEvent(eventId, organizerId);
         event.setStatus(Event.EventStatus.CANCELLED);
@@ -165,6 +332,10 @@ public class EventService {
     // ─── CANCEL ───────────────────────────────────────────────────────────
 
     @Transactional
+    @org.springframework.cache.annotation.Caching(evict = {
+            @org.springframework.cache.annotation.CacheEvict(value = "eventCatalog", key = "#eventId"),
+            @org.springframework.cache.annotation.CacheEvict(value = "recommendations", allEntries = true)
+    })
     public EventResponse cancelEvent(Long eventId, Long organizerId) {
         Event event = getOwnedEvent(eventId, organizerId);
         event.setStatus(Event.EventStatus.CANCELLED);
@@ -178,6 +349,10 @@ public class EventService {
     // ─── PUBLISH ──────────────────────────────────────────────────────────
 
     @Transactional
+    @org.springframework.cache.annotation.Caching(evict = {
+            @org.springframework.cache.annotation.CacheEvict(value = "eventCatalog", key = "#eventId"),
+            @org.springframework.cache.annotation.CacheEvict(value = "recommendations", allEntries = true)
+    })
     public EventResponse publishEvent(Long eventId, Long organizerId) {
         Event event = getOwnedEvent(eventId, organizerId);
         if (event.getStatus() != Event.EventStatus.APPROVED && event.getStatus() != Event.EventStatus.PUBLISHED) {
@@ -192,6 +367,10 @@ public class EventService {
     }
 
     @Transactional
+    @org.springframework.cache.annotation.Caching(evict = {
+            @org.springframework.cache.annotation.CacheEvict(value = "eventCatalog", key = "#eventId"),
+            @org.springframework.cache.annotation.CacheEvict(value = "recommendations", allEntries = true)
+    })
     public EventResponse reviewEvent(Long eventId, Long adminId, String decision, String reason) {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found: " + eventId));
@@ -227,9 +406,39 @@ public class EventService {
         return toResponse(eventRepository.save(event));
     }
 
+    @Transactional(readOnly = true)
+    public List<EventResponse> getEventsByStatus(List<Event.EventStatus> statuses) {
+        return eventRepository.findByStatusIn(statuses).stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "eventCatalog", key = "#eventId")
+    public EventResponse forceExpireEvent(Long eventId, Long userId) {
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() -> new ResourceNotFoundException("Event not found: " + eventId));
+        event.setStatus(Event.EventStatus.EXPIRED);
+        auditService.record(userId, "ADMIN", "EVENT_FORCE_EXPIRED", "EVENT",
+                String.valueOf(event.getId()), "Event force expired by admin");
+        return toResponse(eventRepository.save(event));
+    }
+
+    @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "eventCatalog", key = "#eventId")
+    public EventResponse forceCompleteEvent(Long eventId, Long userId) {
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() -> new ResourceNotFoundException("Event not found: " + eventId));
+        event.setStatus(Event.EventStatus.COMPLETED);
+        auditService.record(userId, "USER", "EVENT_FORCE_COMPLETED", "EVENT",
+                String.valueOf(event.getId()), "Event force completed");
+        return toResponse(eventRepository.save(event));
+    }
+
     // ─── GET ──────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
+    @org.springframework.cache.annotation.Cacheable(value = "eventCatalog", key = "#eventId")
     public EventResponse getEvent(Long eventId) {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found: " + eventId));
@@ -239,6 +448,23 @@ public class EventService {
             throw new ResourceNotFoundException("Event not found: " + eventId);
         }
 
+        return toResponse(event);
+    }
+
+    @Transactional(readOnly = true)
+    public EventResponse getEventForViewer(Long eventId, Long viewerId, String role) {
+        Event event = eventRepository.findByIdWithOrganizer(eventId)
+                .or(() -> eventRepository.findById(eventId))
+                .orElseThrow(() -> new ResourceNotFoundException("Event not found: " + eventId));
+        boolean owner = viewerId != null
+                && event.getOrganizer() != null
+                && event.getOrganizer().getId().equals(viewerId)
+                && "ORGANIZER".equalsIgnoreCase(role);
+        boolean admin = "ADMIN".equalsIgnoreCase(role);
+        if (!owner && !admin && (event.getVisibility() != Event.EventVisibility.PUBLIC
+                || event.getStatus() == Event.EventStatus.DRAFT)) {
+            throw new ResourceNotFoundException("Event not found: " + eventId);
+        }
         return toResponse(event);
     }
 
@@ -299,6 +525,8 @@ public class EventService {
             if (Boolean.TRUE.equals(req.getPast())) {
                 predicates.add(root.get("status").in(
                         Event.EventStatus.PUBLISHED,
+                        Event.EventStatus.LIVE,
+                        Event.EventStatus.ONGOING,
                         Event.EventStatus.COMPLETED,
                         Event.EventStatus.EXPIRED));
                 predicates.add(cb.or(
@@ -306,7 +534,11 @@ public class EventService {
                         root.get("status").in(Event.EventStatus.COMPLETED, Event.EventStatus.EXPIRED)
                 ));
             } else {
-                predicates.add(root.get("status").in(Event.EventStatus.PUBLISHED));
+                predicates.add(root.get("status").in(
+                        Event.EventStatus.PUBLISHED,
+                        Event.EventStatus.LIVE,
+                        Event.EventStatus.ONGOING,
+                        Event.EventStatus.UPCOMING));
                 predicates.add(cb.greaterThanOrEqualTo(root.get("eventDate"), LocalDate.now()));
             }
 
@@ -399,21 +631,44 @@ public class EventService {
         return eventMapper.toResponse(e);
     }
 
+    private void applyCertificateSettings(Event event, CertificateSettingsRequest req, Organizer organizer) {
+        boolean available = Boolean.TRUE.equals(event.isHasCertificate());
+        CertificateSettings settings = event.getCertificateSettings();
+        if (settings == null && (req != null || available)) {
+            settings = CertificateSettings.builder().event(event).build();
+            event.setCertificateSettings(settings);
+        }
+        if (settings == null) return;
+
+        if (req != null) {
+            available = Boolean.TRUE.equals(req.getCertificateAvailable()) || available;
+            settings.setCertificateAvailable(available);
+            settings.setAutomaticGeneration(Boolean.TRUE.equals(req.getAutomaticGeneration()));
+            if (req.getReleaseMode() != null) settings.setReleaseMode(req.getReleaseMode());
+            settings.setReleaseDate(req.getReleaseDate());
+            settings.setMinimumAttendanceRequired(req.getMinimumAttendanceRequired() == null || Boolean.TRUE.equals(req.getMinimumAttendanceRequired()));
+            if (req.getCertificateType() != null) settings.setCertificateType(req.getCertificateType());
+            settings.setOrganizerName(StringUtils.hasText(req.getOrganizerName()) ? req.getOrganizerName() : organizer.getOrganizerName());
+            settings.setOrganizationName(StringUtils.hasText(req.getOrganizationName()) ? req.getOrganizationName() : organizer.getOrganizationName());
+            settings.setVerificationBaseUrl(req.getVerificationBaseUrl());
+            settings.setCertificateExpiry(req.getCertificateExpiry());
+            if (StringUtils.hasText(req.getTheme())) settings.setTheme(req.getTheme());
+        } else {
+            settings.setCertificateAvailable(available);
+            settings.setOrganizerName(organizer.getOrganizerName());
+            settings.setOrganizationName(organizer.getOrganizationName());
+        }
+        event.setHasCertificate(settings.isCertificateAvailable());
+    }
+
     // ─── BANNER UPLOAD ────────────────────────────────────────────────────
 
     @Transactional
     public String uploadBanner(Long eventId, Long organizerId,
                                 org.springframework.web.multipart.MultipartFile file) throws java.io.IOException {
         Event event = getOwnedEvent(eventId, organizerId);
-        String ext = (file.getOriginalFilename() != null && file.getOriginalFilename().contains("."))
-                ? file.getOriginalFilename().substring(file.getOriginalFilename().lastIndexOf('.'))
-                : ".jpg";
-        String filename = "event_" + eventId + "_" + java.util.UUID.randomUUID() + ext;
-        java.nio.file.Path dir = java.nio.file.Paths.get("uploads/banners");
-        java.nio.file.Files.createDirectories(dir);
-        java.nio.file.Files.copy(file.getInputStream(), dir.resolve(filename),
-                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-        event.setEventBanner("/uploads/banners/" + filename);
+        String bannerPath = storageService.store("banners", file, "event_" + eventId);
+        event.setEventBanner(bannerPath);
         eventRepository.save(event);
         return event.getEventBanner();
     }
@@ -430,14 +685,9 @@ public class EventService {
         String ext = original.contains(".") ? original.substring(original.lastIndexOf('.')) : "";
         if (!java.util.List.of(".pdf", ".png", ".jpg", ".jpeg").contains(ext))
             throw new com.eventbooking.exception.BookingException("Supported formats: PDF, PNG, JPG, JPEG");
-        String filename = "authorized_event_" + eventId + "_" + java.util.UUID.randomUUID() + ext;
-        java.nio.file.Path dir = java.nio.file.Paths.get("uploads/authorized-documents");
-        java.nio.file.Files.createDirectories(dir);
-        java.nio.file.Files.copy(file.getInputStream(), dir.resolve(filename),
-                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-        String url = "/uploads/authorized-documents/" + filename;
-        event.setAuthorizedDocumentUrl(url);
+        String docPath = storageService.store("authorized-documents", file, "authorized_event_" + eventId);
+        event.setAuthorizedDocumentUrl(docPath);
         eventRepository.save(event);
-        return url;
+        return docPath;
     }
 }

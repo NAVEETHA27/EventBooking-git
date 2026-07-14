@@ -493,38 +493,31 @@ export default function Register() {
                     </div>
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="City" error={errors.city?.message} accent={t.accent}>
-                      <input {...register('city')} placeholder="City"
-                        style={{...inputStyle(!!errors.city), paddingLeft:'1rem'}}
-                        onFocus={onFocus} onBlur={e => onBlur(e, !!errors.city)} />
-                    </Field>
-                    <Field label="State" error={errors.state?.message} accent={t.accent}>
-                      <input {...register('state')} placeholder="State"
-                        style={{...inputStyle(!!errors.state), paddingLeft:'1rem'}}
-                        onFocus={onFocus} onBlur={e => onBlur(e, !!errors.state)} />
-                    </Field>
-                    <Field label="Country" error={errors.country?.message} accent={t.accent}>
-                      <input {...register('country')} placeholder="Country"
-                        style={{...inputStyle(!!errors.country), paddingLeft:'1rem'}}
-                        onFocus={onFocus} onBlur={e => onBlur(e, !!errors.country)} />
-                    </Field>
-                    <Field label="PIN Code" error={errors.pinCode?.message} accent={t.accent}>
-                      <input {...register('pinCode')} placeholder="PIN code"
-                        style={{...inputStyle(!!errors.pinCode), paddingLeft:'1rem'}}
-                        onFocus={onFocus} onBlur={e => onBlur(e, !!errors.pinCode)} />
-                    </Field>
-                    <Field label="Latitude" error={errors.latitude?.message} accent={t.accent}>
-                      <input {...register('latitude')} placeholder="Latitude"
-                        style={{...inputStyle(!!errors.latitude), paddingLeft:'1rem'}}
-                        onFocus={onFocus} onBlur={e => onBlur(e, !!errors.latitude)} />
-                    </Field>
-                    <Field label="Longitude" error={errors.longitude?.message} accent={t.accent}>
-                      <input {...register('longitude')} placeholder="Longitude"
-                        style={{...inputStyle(!!errors.longitude), paddingLeft:'1rem'}}
-                        onFocus={onFocus} onBlur={e => onBlur(e, !!errors.longitude)} />
-                    </Field>
-                  </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label="City" error={errors.city?.message} accent={t.accent}>
+                        <input {...register('city')} placeholder="City"
+                          style={{...inputStyle(!!errors.city), paddingLeft:'1rem'}}
+                          onFocus={onFocus} onBlur={e => onBlur(e, !!errors.city)} />
+                      </Field>
+                      <Field label="State" error={errors.state?.message} accent={t.accent}>
+                        <input {...register('state')} placeholder="State"
+                          style={{...inputStyle(!!errors.state), paddingLeft:'1rem'}}
+                          onFocus={onFocus} onBlur={e => onBlur(e, !!errors.state)} />
+                      </Field>
+                      <Field label="Country" error={errors.country?.message} accent={t.accent}>
+                        <input {...register('country')} placeholder="Country"
+                          style={{...inputStyle(!!errors.country), paddingLeft:'1rem'}}
+                          onFocus={onFocus} onBlur={e => onBlur(e, !!errors.country)} />
+                      </Field>
+                      <Field label="PIN Code" error={errors.pinCode?.message} accent={t.accent}>
+                        <input {...register('pinCode')} placeholder="PIN code"
+                          style={{...inputStyle(!!errors.pinCode), paddingLeft:'1rem'}}
+                          onFocus={onFocus} onBlur={e => onBlur(e, !!errors.pinCode)} />
+                      </Field>
+                    </div>
+                    {/* latitude and longitude are captured silently from the map — not shown as inputs */}
+                    <input type="hidden" {...register('latitude')} />
+                    <input type="hidden" {...register('longitude')} />
 
                   <motion.button type="submit" disabled={loading}
                     whileHover={loading?{}:{ scale:1.02, boxShadow:`0 10px 32px ${t.accent}45` }}

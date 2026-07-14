@@ -2,6 +2,7 @@ package com.eventbooking.dto.response;
 
 import com.eventbooking.entity.Organizer;
 import lombok.*;
+import java.time.LocalDateTime;
 
 /** Safe DTO — never exposes passwordHash or lazy collections. */
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
@@ -22,6 +23,7 @@ public class OrganizerProfileResponse {
     private String  organizationLogo;
     private boolean emailVerified;
     private String  role;
+    private LocalDateTime createdAt;
 
     public static OrganizerProfileResponse from(Organizer o) {
         return OrganizerProfileResponse.builder()
@@ -31,6 +33,7 @@ public class OrganizerProfileResponse {
                 .city(o.getCity()).state(o.getState()).country(o.getCountry()).website(o.getWebsite())
                 .description(o.getDescription()).organizationLogo(o.getOrganizationLogo())
                 .emailVerified(o.isEmailVerified()).role(o.getRole().name())
+                .createdAt(o.getCreatedAt())
                 .build();
     }
 }

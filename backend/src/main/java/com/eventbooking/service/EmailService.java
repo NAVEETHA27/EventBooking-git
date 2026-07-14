@@ -164,8 +164,30 @@ public class EmailService {
 
     // ── Booking Confirmation ──────────────────────────────────────────────
 
+    /**
+     * Legacy overload — accepts JPA entities.
+     * Do NOT call this from inside a @Transactional method; use sendBookingConfirmationDetached instead.
+     */
     @Async
     public void sendBookingConfirmation(String to, String name, Booking booking, Event event) {
+        sendBookingConfirmationDetached(to, name,
+                booking.getTicketId(), booking.getQuantity(), booking.getTotalAmount().doubleValue(),
+                event.getEventName(),
+                event.getEventDate() != null ? event.getEventDate().toString() : "",
+                event.getEventTime() != null ? event.getEventTime().toString() : "",
+                event.getVenueName() != null ? event.getVenueName() : (event.getLocation() != null ? event.getLocation() : ""));
+    }
+
+    /**
+     * Safe async overload — accepts only plain strings so no JPA entity is held
+     * across thread boundaries, preventing Hibernate session corruption.
+     * Always use this when called from inside a @Transactional method.
+     */
+    @Async
+    public void sendBookingConfirmationDetached(String to, String name,
+                                                String ticketId, int quantity, double totalAmount,
+                                                String eventName, String eventDate,
+                                                String eventTime, String venue) {
         String html = """
             <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:24px;background:#f9f9f9">
               <div style="background:#1565C0;padding:20px;border-radius:8px 8px 0 0;text-align:center">
@@ -185,13 +207,8 @@ public class EmailService {
                 </div>
               </div>
             </div>
-            """.formatted(
-                name, event.getEventName(),
-                event.getEventDate(), event.getEventTime(),
-                event.getVenueName() != null ? event.getVenueName() : event.getLocation(),
-                booking.getTicketId(), booking.getQuantity(),
-                booking.getTotalAmount().doubleValue());
-        sendHtmlEmail(to, "Booking Confirmed – " + event.getEventName(), html);
+            """.formatted(name, eventName, eventDate, eventTime, venue, ticketId, quantity, totalAmount);
+        sendHtmlEmail(to, "Booking Confirmed – " + eventName, html);
     }
 
     // ── Internal ──────────────────────────────────────────────────────────
@@ -252,7 +269,22 @@ public class EmailService {
         }
     }
 
+    /**
+     * Send a plain-text email (used by certificate notifications, AI recommendations, etc.).
+     */
+    @Async
+    public void sendSimpleEmail(String to, String subject, String text) {
+        String html = "<div style='font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:24px'>" +
+                text.replace("\n", "<br/>") + "</div>";
+        sendHtmlEmail(to, subject, html);
+    }
+
     private void sendHtmlEmail(String to, String subject, String html) {
+        if (mailUsername == null || mailUsername.isBlank() || mailUsername.equals("NOT_CONFIGURED")) {
+            String msg = "MAIL_USERNAME is not configured — cannot send email to " + to;
+            log.error("❌ {}", msg);
+            throw new RuntimeException(msg);
+        }
         try {
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");

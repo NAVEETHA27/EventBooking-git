@@ -29,6 +29,7 @@ public class UserProfileService {
     private final PasswordEncoder        passwordEncoder;
     private final AuditService           auditService;
     private final ProfileLocationService profileLocationService;
+    private final StorageService         storageService;
 
     @Transactional(readOnly = true)
     public UserProfileResponse getProfile(Long userId) {
@@ -57,6 +58,7 @@ public class UserProfileService {
             user.setState(StringUtils.trimWhitespace(body.get("state")));
         if (body.containsKey("country"))
             user.setCountry(StringUtils.trimWhitespace(body.get("country")));
+
         if (body.containsKey("gender"))
             user.setGender(body.get("gender"));
         userRepository.save(user);
@@ -77,12 +79,8 @@ public class UserProfileService {
     public String uploadPicture(Long userId, MultipartFile file) throws IOException {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
-        String ext = getExt(file.getOriginalFilename());
-        String filename = "user_" + userId + "_" + UUID.randomUUID() + ext;
-        Path dir = Paths.get("uploads/profile");
-        Files.createDirectories(dir);
-        Files.copy(file.getInputStream(), dir.resolve(filename), StandardCopyOption.REPLACE_EXISTING);
-        user.setProfilePicture("/uploads/profile/" + filename);
+        String picPath = storageService.store("profile", file, "user_" + userId);
+        user.setProfilePicture(picPath);
         userRepository.save(user);
         auditService.record(userId, "USER", "PROFILE_PHOTO_UPDATED", "USER",
                 String.valueOf(userId), "Profile photo updated");
@@ -103,8 +101,4 @@ public class UserProfileService {
                 String.valueOf(userId), "Password changed");
     }
 
-    private String getExt(String filename) {
-        if (filename == null || !filename.contains(".")) return ".jpg";
-        return filename.substring(filename.lastIndexOf('.'));
-    }
 }

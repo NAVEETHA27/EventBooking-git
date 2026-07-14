@@ -28,10 +28,16 @@ public class AdminController {
     private final AdminDashboardService dashboardService;
     private final EventService          eventService;
     private final RefundService         refundService;
+    private final com.eventbooking.ai.AIMetricsService aiMetricsService;
 
     @GetMapping("/dashboard")
     public ApiResponse<Map<String, Object>> dashboard() {
         return ApiResponse.success(dashboardService.stats());
+    }
+
+    @GetMapping("/ai-metrics")
+    public ApiResponse<Map<String, Object>> aiMetrics() {
+        return ApiResponse.success(aiMetricsService.getMetrics());
     }
 
     @GetMapping("/approvals")

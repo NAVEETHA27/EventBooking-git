@@ -308,6 +308,7 @@ public class AuthService {
                 .refreshToken(refreshToken)
                 .tokenType("Bearer")
                 .expiresIn(jwtTokenProvider.getExpirationMs())
+                .expiresAt(System.currentTimeMillis() + jwtTokenProvider.getExpirationMs())
                 .user(AuthResponse.UserInfo.builder()
                         .id(id)
                         .name(name)

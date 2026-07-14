@@ -1,4 +1,4 @@
-import { Suspense, lazy } from 'react';
+﻿import { Suspense, lazy } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -8,6 +8,7 @@ import Spinner from './components/common/Spinner';
 const Landing          = lazy(() => import('./pages/Landing'));
 const Events           = lazy(() => import('./pages/Events'));
 const EventDetail      = lazy(() => import('./pages/EventDetail'));
+const Discover         = lazy(() => import('./pages/Discover'));
 const Login            = lazy(() => import('./pages/auth/Login'));
 const Register         = lazy(() => import('./pages/auth/Register'));
 const ForgotPassword   = lazy(() => import('./pages/auth/ForgotPassword'));
@@ -24,7 +25,12 @@ const Notifications    = lazy(() => import('./pages/user/Notifications'));
 const PaymentHistory   = lazy(() => import('./pages/user/PaymentHistory'));
 const RefundTracking   = lazy(() => import('./pages/user/RefundTracking'));
 const QueueStatus      = lazy(() => import('./pages/user/QueueStatus'));
+const Portfolio        = lazy(() => import('./pages/user/Portfolio'));
+const Certificates     = lazy(() => import('./pages/user/Certificates'));
+const Networking       = lazy(() => import('./pages/user/Networking'));
 const HelpCenter       = lazy(() => import('./pages/HelpCenter'));
+const Leaderboard      = lazy(() => import('./pages/Leaderboard'));
+const VerifyCertificate = lazy(() => import('./pages/VerifyCertificate'));
 
 const OrgDashboard     = lazy(() => import('./pages/organizer/Dashboard'));
 const CreateEvent      = lazy(() => import('./pages/organizer/CreateEvent'));
@@ -32,8 +38,16 @@ const EditEvent        = lazy(() => import('./pages/organizer/EditEvent'));
 const MyEvents         = lazy(() => import('./pages/organizer/MyEvents'));
 const OrgProfile       = lazy(() => import('./pages/organizer/Profile'));
 const Attendees        = lazy(() => import('./pages/organizer/Attendees'));
+const OrgAnalytics     = lazy(() => import('./pages/organizer/Analytics'));
+const OrgCopilot       = lazy(() => import('./pages/organizer/Copilot'));
+const OrgCertificates  = lazy(() => import('./pages/organizer/Certificates'));
+const AttendanceScanner = lazy(() => import('./pages/organizer/AttendanceScanner'));
+const ScannerRelay     = lazy(() => import('./pages/organizer/ScannerRelay'));
+
 const AdminDashboard   = lazy(() => import('./pages/admin/Dashboard'));
 const AdminApprovals   = lazy(() => import('./pages/admin/Approvals'));
+const AIInsights       = lazy(() => import('./pages/admin/AIInsights'));
+const AdminCertificates = lazy(() => import('./pages/admin/Certificates'));
 
 const NotFound         = lazy(() => import('./pages/NotFound'));
 
@@ -74,8 +88,11 @@ function AppRoutes() {
           <Route path="/"             element={<Wrap><Landing /></Wrap>} />
           <Route path="/events"       element={<Wrap><Events /></Wrap>} />
           <Route path="/events/:id"   element={<Wrap><EventDetail /></Wrap>} />
+          <Route path="/discover"     element={<Wrap><Discover /></Wrap>} />
+          <Route path="/leaderboard"  element={<Wrap><Leaderboard /></Wrap>} />
           <Route path="/help"         element={<Wrap><HelpCenter /></Wrap>} />
           <Route path="/verify-email" element={<Wrap><VerifyEmail /></Wrap>} />
+          <Route path="/verify/certificate/:certificateId" element={<Wrap><VerifyCertificate /></Wrap>} />
 
           {/* Auth */}
           <Route path="/login"           element={<GuestRoute><Wrap><Login /></Wrap></GuestRoute>} />
@@ -96,17 +113,30 @@ function AppRoutes() {
           <Route path="/payments"      element={<PrivateRoute roles={['USER']}><Wrap><PaymentHistory /></Wrap></PrivateRoute>} />
           <Route path="/refunds"       element={<PrivateRoute roles={['USER']}><Wrap><RefundTracking /></Wrap></PrivateRoute>} />
           <Route path="/queue-status"  element={<PrivateRoute roles={['USER']}><Wrap><QueueStatus /></Wrap></PrivateRoute>} />
+          <Route path="/portfolio"     element={<PrivateRoute roles={['USER']}><Wrap><Portfolio /></Wrap></PrivateRoute>} />
+          <Route path="/certificates"  element={<PrivateRoute roles={['USER']}><Wrap><Certificates /></Wrap></PrivateRoute>} />
+          <Route path="/networking"    element={<PrivateRoute roles={['USER']}><Wrap><Networking /></Wrap></PrivateRoute>} />
 
           {/* Organizer */}
           <Route path="/organizer/dashboard"       element={<PrivateRoute roles={['ORGANIZER']}><Wrap><OrgDashboard /></Wrap></PrivateRoute>} />
           <Route path="/organizer/events"          element={<PrivateRoute roles={['ORGANIZER']}><Wrap><MyEvents /></Wrap></PrivateRoute>} />
           <Route path="/organizer/events/create"   element={<PrivateRoute roles={['ORGANIZER']}><Wrap><CreateEvent /></Wrap></PrivateRoute>} />
           <Route path="/organizer/events/:id/edit" element={<PrivateRoute roles={['ORGANIZER']}><Wrap><EditEvent /></Wrap></PrivateRoute>} />
+          <Route path="/organizer/events/:id/attendance" element={<PrivateRoute roles={['ORGANIZER']}><Wrap><AttendanceScanner /></Wrap></PrivateRoute>} />
           <Route path="/organizer/attendees"       element={<PrivateRoute roles={['ORGANIZER']}><Wrap><Attendees /></Wrap></PrivateRoute>} />
           <Route path="/organizer/profile"         element={<PrivateRoute roles={['ORGANIZER']}><Wrap><OrgProfile /></Wrap></PrivateRoute>} />
+          <Route path="/organizer/analytics"       element={<PrivateRoute roles={['ORGANIZER']}><Wrap><OrgAnalytics /></Wrap></PrivateRoute>} />
+          <Route path="/organizer/copilot"         element={<PrivateRoute roles={['ORGANIZER']}><Wrap><OrgCopilot /></Wrap></PrivateRoute>} />
+          <Route path="/organizer/certificates"    element={<PrivateRoute roles={['ORGANIZER']}><Wrap><OrgCertificates /></Wrap></PrivateRoute>} />
+
+          {/* Admin */}
           <Route path="/admin/dashboard"           element={<PrivateRoute roles={['ADMIN']}><Wrap><AdminDashboard /></Wrap></PrivateRoute>} />
           <Route path="/admin/approvals"           element={<PrivateRoute roles={['ADMIN']}><Wrap><AdminApprovals /></Wrap></PrivateRoute>} />
+          <Route path="/admin/ai-insights"         element={<PrivateRoute roles={['ADMIN']}><Wrap><AIInsights /></Wrap></PrivateRoute>} />
+          <Route path="/admin/certificates"        element={<PrivateRoute roles={['ADMIN']}><Wrap><AdminCertificates /></Wrap></PrivateRoute>} />
         </Route>
+        {/* External scanner relay — no layout, no auth guard, token is in URL query */}
+        <Route path="/scanner-relay" element={<Wrap><ScannerRelay /></Wrap>} />
         <Route path="*" element={<Wrap><NotFound /></Wrap>} />
       </Routes>
     </AnimatePresence>

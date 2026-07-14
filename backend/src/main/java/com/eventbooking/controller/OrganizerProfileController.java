@@ -91,18 +91,22 @@ public class OrganizerProfileController {
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getParticipants(
             @AuthenticationPrincipal AuthPrincipal principal) {
         List<Map<String, Object>> rows = participantRepository
-                .findByEventOrganizerId(principal.getId())
+                .findByEventOrganizerIdWithDetails(principal.getId())
                 .stream()
-                .map(p -> Map.<String, Object>of(
-                        "id",        p.getId(),
-                        "name",      p.getName(),
-                        "email",     p.getEmail(),
-                        "department", p.getDepartment() == null ? "" : p.getDepartment(),
-                        "college",   p.getCollege() == null ? "" : p.getCollege(),
-                        "bookingId", p.getBooking().getId(),
-                        "ticketId",  p.getBooking().getTicketId(),
-                        "eventName", p.getEvent().getEventName(),
-                        "eventDate", p.getEvent().getEventDate().toString()))
+                .map(p -> {
+                    Map<String, Object> m = new java.util.LinkedHashMap<>();
+                    m.put("id",         p.getId());
+                    m.put("name",       p.getName());
+                    m.put("email",      p.getEmail());
+                    m.put("department", p.getDepartment() != null ? p.getDepartment() : "");
+                    m.put("college",    p.getCollege()    != null ? p.getCollege()    : "");
+                    m.put("bookingId",  p.getBooking() != null ? p.getBooking().getId()       : null);
+                    m.put("ticketId",   p.getBooking() != null ? p.getBooking().getTicketId() : null);
+                    m.put("eventName",  p.getEvent()   != null ? p.getEvent().getEventName()  : "");
+                    m.put("eventDate",  p.getEvent()   != null && p.getEvent().getEventDate() != null
+                            ? p.getEvent().getEventDate().toString() : "");
+                    return m;
+                })
                 .toList();
         return ResponseEntity.ok(ApiResponse.success(rows));
     }

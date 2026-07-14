@@ -2,18 +2,19 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { motion } from 'framer-motion';
-import { eventsAPI } from '../../services/api';
+import { certificatesAPI, eventsAPI, organizerAPI } from '../../services/api';
 import { toast } from 'react-toastify';
 import Spinner from '../../components/common/Spinner';
-import { FiEdit2, FiTrash2, FiXCircle, FiCheckCircle, FiPlus } from 'react-icons/fi';
+import { FiAward, FiEdit2, FiEye, FiImage, FiMessageCircle, FiTrash2, FiXCircle, FiCheckCircle, FiPlus, FiCamera } from 'react-icons/fi';
 
-const STATUS_BADGE = { PUBLISHED:'badge-green',DRAFT:'badge-yellow',CANCELLED:'badge-red',COMPLETED:'badge-gray',UPCOMING:'badge-blue' };
+const STATUS_BADGE = { PUBLISHED:'badge-green', LIVE:'badge-orange', UPCOMING:'badge-blue', APPROVED:'badge-green', DRAFT:'badge-yellow', CANCELLED:'badge-red', COMPLETED:'badge-gray' };
 
 function refreshEventState(qc) {
   qc.invalidateQueries('org-events');
   qc.invalidateQueries('org-events-dash');
   qc.invalidateQueries('org-dash');
   qc.invalidateQueries('events');
+  qc.invalidateQueries('discover');
   qc.invalidateQueries('notifs');
 }
 
@@ -29,6 +30,27 @@ export default function MyEvents() {
   const cancelMutation  = useMutation((id) => eventsAPI.cancel(id),  { onSuccess:() => { toast.success('Event cancelled'); refreshEventState(qc); } });
   const publishMutation = useMutation((id) => eventsAPI.publish(id), { onSuccess:() => { toast.success('Event published!'); refreshEventState(qc); } });
   const deleteMutation  = useMutation((id) => eventsAPI.delete(id),  { onSuccess:() => { toast.success('Event deleted'); refreshEventState(qc); } });
+  const templateMutation = useMutation(({ id, formData, signatureName }) => certificatesAPI.uploadTemplate(id, formData, signatureName), {
+    onSuccess:() => { toast.success('Certificate template uploaded'); refreshEventState(qc); }
+  });
+  const posterMutation = useMutation((id) => organizerAPI.generatePoster(id).then(r => r.data?.data), {
+    onSuccess:(url) => { toast.success('Poster generated'); if (url) window.open(url, '_blank'); }
+  });
+
+  const uploadTemplate = (eventId) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pdf,.png,.jpg,.jpeg';
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const signatureName = window.prompt('Signature name for certificates', '') || '';
+      const formData = new FormData();
+      formData.append('file', file);
+      templateMutation.mutate({ id: eventId, formData, signatureName });
+    };
+    input.click();
+  };
 
   if (isLoading) return <Spinner />;
 
@@ -44,7 +66,7 @@ export default function MyEvents() {
 
         {/* Filters */}
         <div className="flex gap-2 mb-6 flex-wrap">
-          {['','DRAFT','PUBLISHED','COMPLETED','CANCELLED'].map(s => (
+          {['','DRAFT','PUBLISHED','UPCOMING','LIVE','COMPLETED','CANCELLED'].map(s => (
             <button key={s} onClick={() => { setFilter(s); setPage(0); }}
               className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
                 filter===s ? 'bg-blue-600 text-white shadow-blue' : 'bg-white text-gray-600 border border-blue-100 hover:bg-blue-50'
@@ -81,17 +103,39 @@ export default function MyEvents() {
                         <td><span className={`badge ${STATUS_BADGE[ev.status]||'badge-gray'}`}>{ev.status}</span></td>
                         <td>
                           <div className="flex items-center gap-2">
+                            <Link to={`/events/${ev.id}?tab=community`} title="Open community chat"
+                              className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 transition-colors">
+                              <FiMessageCircle className="w-4 h-4" />
+                            </Link>
+                            <Link to={`/events/${ev.id}`} title="View event"
+                              className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors">
+                              <FiEye className="w-4 h-4" />
+                            </Link>
                             <Link to={`/organizer/events/${ev.id}/edit`} title="Edit"
                               className="p-1.5 rounded-lg text-blue-500 hover:bg-blue-50 transition-colors">
                               <FiEdit2 className="w-4 h-4" />
                             </Link>
+                            <Link to={`/organizer/events/${ev.id}/attendance`} title="Attendance scanner"
+                              className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors">
+                              <FiCamera className="w-4 h-4" />
+                            </Link>
+                            {ev.hasCertificate && (
+                              <button onClick={() => uploadTemplate(ev.id)} title="Upload certificate template"
+                                className="p-1.5 rounded-lg text-violet-600 hover:bg-violet-50 transition-colors">
+                                <FiAward className="w-4 h-4" />
+                              </button>
+                            )}
+                            <button onClick={() => posterMutation.mutate(ev.id)} title="Generate poster"
+                              className="p-1.5 rounded-lg text-teal-600 hover:bg-teal-50 transition-colors">
+                              <FiImage className="w-4 h-4" />
+                            </button>
                             {ev.status === 'DRAFT' && (
                               <button onClick={() => publishMutation.mutate(ev.id)} title="Publish"
                                 className="p-1.5 rounded-lg text-green-600 hover:bg-green-50 transition-colors">
                                 <FiCheckCircle className="w-4 h-4" />
                               </button>
                             )}
-                            {['PUBLISHED','DRAFT'].includes(ev.status) && (
+                            {['PUBLISHED','DRAFT','APPROVED','UPCOMING','LIVE'].includes(ev.status) && (
                               <button onClick={() => { if(window.confirm('Cancel event?')) cancelMutation.mutate(ev.id); }} title="Cancel"
                                 className="p-1.5 rounded-lg text-orange-500 hover:bg-orange-50 transition-colors">
                                 <FiXCircle className="w-4 h-4" />

@@ -37,6 +37,9 @@ export default function Navbar() {
 
   useEffect(() => {
     if (!user) return;
+    // Don't poll if session is already expired
+    const expiresAt = localStorage.getItem('eb_expires_at');
+    if (expiresAt && Date.now() >= parseInt(expiresAt, 10)) return;
     notificationsAPI.getUnread().then((r) => setUnread(r.data?.data ?? 0)).catch(() => {});
   }, [user, location.pathname]);
 
@@ -60,6 +63,7 @@ export default function Navbar() {
       ? [
           { to: '/admin/dashboard', label: 'Admin', icon: <MdDashboard className="h-3.5 w-3.5" /> },
           { to: '/admin/approvals', label: 'Approvals', icon: <FiList className="h-3.5 w-3.5" /> },
+          { to: '/admin/certificates', label: 'Certificates', icon: <FiAward className="h-3.5 w-3.5" /> },
           { to: '/help', label: 'Help', icon: <FiSearch className="h-3.5 w-3.5" /> },
         ]
       : isOrg
@@ -68,35 +72,47 @@ export default function Navbar() {
           { to: '/organizer/events', label: 'My Events', icon: <FiList className="h-3.5 w-3.5" /> },
           { to: '/organizer/events/create', label: 'Create Event', icon: <FiPlusCircle className="h-3.5 w-3.5" /> },
           { to: '/organizer/attendees', label: 'Attendees', icon: <FiUser className="h-3.5 w-3.5" /> },
+          { to: '/organizer/certificates', label: 'Certificates', icon: <FiAward className="h-3.5 w-3.5" /> },
+          { to: '/organizer/copilot', label: 'Smart Assistant', icon: <FiSearch className="h-3.5 w-3.5" /> },
           { to: '/events', label: 'Browse', icon: <FiSearch className="h-3.5 w-3.5" /> },
         ]
       : [
           { to: '/dashboard', label: 'My Dashboard', icon: <MdDashboard className="h-3.5 w-3.5" /> },
           { to: '/events', label: 'Browse Events', icon: <FiSearch className="h-3.5 w-3.5" /> },
+          { to: '/discover', label: 'Discover', icon: <FiSearch className="h-3.5 w-3.5" /> },
+          { to: '/networking', label: 'Network', icon: <FiUser className="h-3.5 w-3.5" /> },
           { to: '/bookings', label: 'My Bookings', icon: <MdEventAvailable className="h-3.5 w-3.5" /> },
           { to: '/payments', label: 'Payments', icon: <FiList className="h-3.5 w-3.5" /> },
-          { to: '/notifications', label: 'Notifications', icon: <FiBell className="h-3.5 w-3.5" /> },
+          { to: '/portfolio', label: 'My Portfolio', icon: <FiList className="h-3.5 w-3.5" /> },
+          { to: '/certificates', label: 'Certificates', icon: <FiList className="h-3.5 w-3.5" /> },
         ]
     : [
         { to: '/', label: 'Home', icon: <FiHome className="h-3.5 w-3.5" /> },
         { to: '/events', label: 'Events', icon: <FiSearch className="h-3.5 w-3.5" /> },
+        { to: '/discover', label: 'Discover', icon: <FiList className="h-3.5 w-3.5" /> },
+        { to: '/leaderboard', label: 'Leaderboard', icon: <FiList className="h-3.5 w-3.5" /> },
         { to: '/help', label: 'Help', icon: <FiList className="h-3.5 w-3.5" /> },
       ];
 
   const menuItems = isOrg
     ? [
-        { label: 'Dashboard', icon: <MdDashboard />, to: '/organizer/dashboard' },
-        { label: 'My Events', icon: <FiCalendar />, to: '/organizer/events' },
-        { label: 'Create Event', icon: <FiPlusCircle />, to: '/organizer/events/create' },
-        { label: 'Attendees', icon: <FiUser />, to: '/organizer/attendees' },
-        { label: 'Notifications', icon: <FiBell />, to: '/notifications' },
-        { label: 'Profile', icon: <FiUser />, to: '/organizer/profile' },
+        { label: 'Dashboard',   icon: <MdDashboard />,  to: '/organizer/dashboard' },
+        { label: 'My Events',   icon: <FiCalendar />,   to: '/organizer/events' },
+        { label: 'Create Event',icon: <FiPlusCircle />, to: '/organizer/events/create' },
+        { label: 'Analytics',   icon: <FiList />,       to: '/organizer/analytics' },
+        { label: 'Certificates',icon: <FiAward />,      to: '/organizer/certificates' },
+        { label: 'Smart Assistant', icon: <FiSearch />,     to: '/organizer/copilot' },
+        { label: 'Attendees',   icon: <FiUser />,       to: '/organizer/attendees' },
+        { label: 'Notifications',icon: <FiBell />,      to: '/notifications' },
+        { label: 'Profile',     icon: <FiUser />,       to: '/organizer/profile' },
       ]
     : isAdmin
     ? [
-        { label: 'Dashboard', icon: <MdDashboard />, to: '/admin/dashboard' },
-        { label: 'Approvals', icon: <FiList />, to: '/admin/approvals' },
-        { label: 'Help Center', icon: <FiSearch />, to: '/help' },
+        { label: 'Dashboard',   icon: <MdDashboard />, to: '/admin/dashboard' },
+        { label: 'Approvals',   icon: <FiList />,      to: '/admin/approvals' },
+        { label: 'Certificates',icon: <FiAward />,     to: '/admin/certificates' },
+        { label: 'Platform Insights', icon: <FiSearch />,    to: '/admin/ai-insights' },
+        { label: 'Help Center', icon: <FiSearch />,    to: '/help' },
       ]
     : [
         { label: 'Dashboard', icon: <MdDashboard />, to: '/dashboard' },
@@ -161,22 +177,29 @@ export default function Navbar() {
           <div className="flex items-center gap-1.5">
             {user ? (
               <>
-                <Link to="/notifications" className="relative rounded-xl p-2.5 text-gray-500 transition-all duration-200 hover:bg-teal-50 hover:text-teal-700">
-                  <FiBell className="h-5 w-5" />
-                  <AnimatePresence>
-                    {unread > 0 && (
-                      <motion.span
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                        exit={{ scale: 0 }}
-                        className="absolute -right-0.5 -top-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full text-[9px] font-bold text-white"
-                        style={{ background: 'linear-gradient(135deg,#E11D48,#F97316)' }}
-                      >
-                        {unread > 9 ? '9+' : unread}
-                      </motion.span>
-                    )}
-                  </AnimatePresence>
-                </Link>
+                {/* Bell icon — only for USER/ORGANIZER */}
+                {(user.role === 'USER' || user.role === 'ORGANIZER') && (
+                  <Link
+                    to="/notifications"
+                    className="relative rounded-xl p-2.5 text-slate-500 transition-all duration-200 hover:bg-teal-50 hover:text-teal-700"
+                    aria-label="Notifications"
+                  >
+                    <FiBell className="h-5 w-5" />
+                    <AnimatePresence>
+                      {unread > 0 && (
+                        <motion.span
+                          initial={{ scale: 0 }}
+                          animate={{ scale: 1 }}
+                          exit={{ scale: 0 }}
+                          className="absolute -right-0.5 -top-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full text-[9px] font-bold text-white"
+                          style={{ background: 'linear-gradient(135deg,#E11D48,#F97316)' }}
+                        >
+                          {unread > 9 ? '9+' : unread}
+                        </motion.span>
+                      )}
+                    </AnimatePresence>
+                  </Link>
+                )}
 
                 <div className="relative" ref={dropRef}>
                   <motion.button
@@ -227,9 +250,9 @@ export default function Navbar() {
                         <div className="mt-1 border-t border-slate-100 pt-1">
                           <button
                             onClick={() => {
-                              logout();
                               setDropOpen(false);
-                              navigate('/');
+                              logout();
+                              navigate('/login');
                             }}
                             className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-red-500 transition-colors hover:bg-red-50"
                           >

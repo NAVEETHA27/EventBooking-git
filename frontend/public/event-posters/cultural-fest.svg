@@ -1,0 +1,23 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" role="img" aria-label="Cultural Fest poster">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4a044e"/>
+      <stop offset="1" stop-color="#d946ef"/>
+    </linearGradient>
+    <pattern id="grid" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M64 0H0v64" fill="none" stroke="rgba(255,255,255,.09)" stroke-width="2"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="800" fill="url(#bg)"/>
+  <rect width="1200" height="800" fill="url(#grid)" opacity="0.9"/>
+  <circle cx="1010" cy="140" r="180" fill="rgba(255,255,255,.12)"/>
+  <circle cx="160" cy="675" r="220" fill="rgba(255,255,255,.09)"/>
+  <rect x="74" y="72" width="1052" height="656" rx="34" fill="rgba(15,23,42,.38)" stroke="rgba(255,255,255,.28)" stroke-width="3"/>
+  <text x="112" y="165" fill="rgba(255,255,255,.72)" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="34" font-weight="700" letter-spacing="5">EVENTGPT CAMPUS</text>
+  <text x="112" y="365" fill="white" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="88" font-weight="900">Cultural Fest</text>
+  <text x="116" y="430" fill="rgba(255,255,255,.82)" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="34" font-weight="700">Music • Dance • Stage</text>
+  <rect x="112" y="540" width="340" height="72" rx="16" fill="rgba(255,255,255,.16)" stroke="rgba(255,255,255,.28)"/>
+  <text x="145" y="587" fill="white" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="28" font-weight="800">Register Now</text>
+  <rect x="805" y="240" width="220" height="220" rx="44" fill="rgba(255,255,255,.18)" stroke="rgba(255,255,255,.35)" stroke-width="4"/>
+  <text x="915" y="380" text-anchor="middle" fill="white" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="76" font-weight="900">♪</text>
+</svg>

@@ -1,15 +1,20 @@
 import { useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { motion } from 'framer-motion';
-import { eventsAPI, bookingsAPI, paymentsAPI } from '../services/api';
+import { eventsAPI, bookingsAPI, paymentsAPI, getApiErrorMessage } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import Spinner from '../components/common/Spinner';
 import QueryError from '../components/common/QueryError';
 import { toast } from 'react-toastify';
-import { FiCalendar, FiMapPin, FiUsers, FiMinus, FiPlus, FiShare2, FiExternalLink, FiClock, FiAward } from 'react-icons/fi';
+import { QRCodeSVG } from 'qrcode.react';
+import RatingsPanel from '../components/common/RatingsPanel';
+import EventCard from '../components/common/EventCard';
+import EventCommunityChat from '../components/common/EventCommunityChat';
+import { FiCalendar, FiMapPin, FiUsers, FiMinus, FiPlus, FiShare2, FiExternalLink, FiClock, FiPhone, FiMail, FiMessageCircle, FiCheckCircle, FiLock } from 'react-icons/fi';
 import { MdSchool } from 'react-icons/md';
 import { format } from 'date-fns';
+import TravelDashboard from '../components/common/TravelDashboard';
 
 const CAT_LABELS = { HACKATHON:'🚀 Hackathon',WORKSHOP:'🔧 Workshop',TECHNICAL_SYMPOSIUM:'⚡ Symposium',
   CODING_COMPETITION:'💻 Coding Comp',SEMINAR:'📋 Seminar',PROJECT_EXHIBITION:'🏆 Exhibition',
@@ -17,14 +22,45 @@ const CAT_LABELS = { HACKATHON:'🚀 Hackathon',WORKSHOP:'🔧 Workshop',TECHNIC
 
 export default function EventDetail() {
   const { id }       = useParams();
+  const [searchParams] = useSearchParams();
   const { user }     = useAuth();
   const navigate     = useNavigate();
   const qc           = useQueryClient();
   const [qty, setQty] = useState(1);
+  const [assistantQuestion, setAssistantQuestion] = useState('');
+  const [assistantAnswer, setAssistantAnswer] = useState('');
+  const initialTab = ['details', 'travel', 'community'].includes(searchParams.get('tab')) ? searchParams.get('tab') : 'details';
+  const [activeTab, setActiveTab] = useState(initialTab);
   const emptyParticipant = { name:'', email:'', department:'', college:'' };
   const [participants, setParticipants] = useState([emptyParticipant]);
 
   const { data, isLoading, isError, error, refetch } = useQuery(['event', id], () => eventsAPI.getById(id).then(r => r.data?.data));
+  const { data: relatedData } = useQuery(
+    ['related-events', id, data?.category, data?.location],
+    () => eventsAPI.search({ category: data.category, location: data.location, size: 4 }).then(r => r.data?.data),
+    { enabled: !!data?.category, staleTime: 60_000 }
+  );
+
+  // Check if logged-in user has a confirmed booking for this event
+  const { data: myBookingsData } = useQuery(
+    ['my-bookings-for-event', id, user?.id],
+    () => bookingsAPI.myBookings({ page: 0, size: 50 }).then(r => r.data?.data),
+    { enabled: !!user && user.role === 'USER', staleTime: 30_000 }
+  );
+  const hasConfirmedBooking = myBookingsData?.content?.some(
+    b => String(b.event?.id) === String(id) && b.bookingStatus === 'CONFIRMED'
+  ) ?? false;
+  const isOrganizer = user?.role === 'ORGANIZER';
+  const isAdmin = user?.role === 'ADMIN';
+  const canAccessChat = isOrganizer || isAdmin || hasConfirmedBooking;
+
+  const aiMutation = useMutation(
+    (question) => eventsAPI.eventQa(id, question).then(r => r.data?.data),
+    {
+      onSuccess: (res) => setAssistantAnswer(res?.answer || 'No event-specific answer is available yet.'),
+      onError: () => setAssistantAnswer('I could not answer that from the stored event details right now.'),
+    }
+  );
 
   const bookMutation = useMutation(
     () => bookingsAPI.book({
@@ -39,6 +75,7 @@ export default function EventDetail() {
         qc.invalidateQueries('events');
         qc.invalidateQueries('dash-bookings');
         qc.invalidateQueries('my-bookings');
+        qc.invalidateQueries(['my-bookings-for-event', id, user?.id]);
         qc.invalidateQueries('notifs');
         if (!booking?.id) {
           toast.error('Booking was created, but checkout could not be opened.');
@@ -52,7 +89,7 @@ export default function EventDetail() {
             toast.success(`Free booking confirmed! Ticket: ${booking.ticketId}`);
             navigate(`/bookings/${booking.id}`);
           } catch (err) {
-            toast.error(err?.response?.data?.message || 'Could not confirm free booking.');
+            toast.error(getApiErrorMessage(err, 'Could not confirm free booking.'));
             navigate(`/checkout/${booking.id}`);
           }
           return;
@@ -62,7 +99,7 @@ export default function EventDetail() {
         navigate(`/checkout/${booking.id}`);
       },
       onError: (err) => {
-        toast.error(err?.response?.data?.message || 'Could not reserve tickets. Please try again.');
+        toast.error(getApiErrorMessage(err, 'Could not reserve tickets. Please try again.'));
       },
     }
   );
@@ -84,8 +121,14 @@ export default function EventDetail() {
   const ev       = data;
   const isFree   = !ev.ticketPrice || Number(ev.ticketPrice) === 0;
   const total    = isFree ? 0 : Number(ev.ticketPrice) * qty;
-  const canBook  = ev.availableSeats > 0 && ev.status !== 'CANCELLED' && ev.status !== 'COMPLETED';
+  const registrationDeadline = ev.registrationDeadline ? new Date(`${ev.registrationDeadline}T23:59:59`) : null;
+  const canBook  = ev.availableSeats > 0
+    && ['PUBLISHED', 'UPCOMING', 'LIVE', 'ONGOING'].includes(ev.status)
+    && (!registrationDeadline || new Date() <= registrationDeadline);
   const catLabel = CAT_LABELS[ev.category] || '📅 Event';
+  const computedStatus = getLiveStatus(ev);
+  const relatedEvents = (relatedData?.content || []).filter(item => item.id !== ev.id).slice(0, 3);
+  const eventUrl = window.location.href;
 
   return (
     <div style={{ background:'#F0F4FF', minHeight:'100vh' }}>
@@ -95,10 +138,23 @@ export default function EventDetail() {
           {/* Left */}
           <div className="lg:col-span-2 space-y-7">
             {/* Banner */}
-            <div className="rounded-3xl overflow-hidden h-72 md:h-96 bg-gradient-to-br from-blue-100 to-indigo-100 shadow-card">
+            <div className="rounded-3xl overflow-hidden h-72 md:h-96 shadow-card" style={{
+              background: {
+                HACKATHON:'linear-gradient(135deg,#1e3a5f,#0f766e)',
+                WORKSHOP:'linear-gradient(135deg,#78350f,#92400e)',
+                SEMINAR:'linear-gradient(135deg,#1e3a5f,#1e40af)',
+                CULTURAL:'linear-gradient(135deg,#86198f,#a21caf)',
+                SPORTS:'linear-gradient(135deg,#14532d,#15803d)',
+                CODING_COMPETITION:'linear-gradient(135deg,#064e3b,#065f46)',
+                TECHNICAL_SYMPOSIUM:'linear-gradient(135deg,#312e81,#1e40af)',
+              }[ev.category] || 'linear-gradient(135deg,#1e293b,#334155)'
+            }}>
               {ev.eventBanner
                 ? <img src={ev.eventBanner} alt={ev.eventName} onError={(e) => { e.currentTarget.style.display = 'none'; }} className="w-full h-full object-cover" />
-                : <div className="w-full h-full flex items-center justify-center text-8xl opacity-30">🎓</div>}
+                : <div className="w-full h-full flex flex-col items-center justify-center gap-3 opacity-80">
+                    <span className="text-7xl">{{HACKATHON:'🚀',WORKSHOP:'🔧',SEMINAR:'📋',CULTURAL:'🎭',SPORTS:'⚽',CODING_COMPETITION:'💻',TECHNICAL_SYMPOSIUM:'⚡',PLACEMENT_PREP:'💼',TECHNICAL_TRAINING:'📚',INTER_COLLEGE:'🎓',PROJECT_EXHIBITION:'🏆'}[ev.category]||'📅'}</span>
+                    <span className="text-sm font-bold text-white/60 uppercase tracking-widest">{ev.category?.replace(/_/g,' ')}</span>
+                  </div>}
             </div>
 
             {/* Title */}
@@ -128,6 +184,57 @@ export default function EventDetail() {
               </div>
             </div>
 
+            <div className="flex gap-2 rounded-2xl border border-blue-100 bg-white p-2 shadow-card">
+              {[
+                ['details', 'Event Details'],
+                ['travel', '🗺️ Travel'],
+                ['community', 'Community Chat'],
+              ].map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setActiveTab(key)}
+                  className={`flex-1 rounded-xl px-4 py-2 text-sm font-bold transition-colors ${activeTab === key ? 'bg-blue-600 text-white' : 'text-blue-800 hover:bg-blue-50'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {activeTab === 'travel' ? (
+              <TravelDashboard ev={ev} canAccessDetails={canAccessChat} user={user} id={id} />
+            ) : activeTab === 'community' ? (
+              canAccessChat ? (
+                <EventCommunityChat eventId={ev.id} event={ev} organizer={ev.organizer} />
+              ) : (
+                <div className="rounded-2xl border border-blue-100 bg-white p-10 text-center shadow-card">
+                  <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50">
+                    <FiLock className="h-8 w-8 text-blue-400" />
+                  </div>
+                  <h3 className="text-lg font-bold text-blue-900 mb-2">Community Chat</h3>
+                  <p className="text-sm text-slate-500 mb-5 max-w-xs mx-auto">
+                    {!user
+                      ? 'Sign in and register for this event to join the community discussion.'
+                      : 'Register for this event to join the community discussion.'}
+                  </p>
+                  {!user ? (
+                    <Link to={`/login?redirect=/events/${id}`} className="btn-primary inline-flex items-center gap-2">
+                      Sign In to Register
+                    </Link>
+                  ) : canBook ? (
+                    <button
+                      onClick={() => setActiveTab('details')}
+                      className="btn-primary inline-flex items-center gap-2"
+                    >
+                      Register for This Event
+                    </button>
+                  ) : (
+                    <p className="text-xs text-slate-400">Registration is currently closed for this event.</p>
+                  )}
+                </div>
+              )
+            ) : (
+              <>
             {/* Description */}
             {ev.description && (
               <div className="bg-white rounded-2xl p-6 border border-blue-100 shadow-card">
@@ -157,6 +264,134 @@ export default function EventDetail() {
                 className="flex items-center gap-2 text-blue-600 hover:text-blue-800 text-sm font-medium">
                 <FiExternalLink /> View on Google Maps
               </a>
+            )}
+
+            <InfoCard title="Contact Organizer">
+              <div className="space-y-2 text-sm text-gray-700">
+                <p className="font-bold text-blue-900">{ev.organizer?.organizerName || 'Organizer'}</p>
+                {(ev.whatsappContactNumber || ev.organizer?.phone) && (
+                  <a className="flex items-center gap-2 text-blue-700" href={`tel:${cleanPhone(ev.whatsappContactNumber || ev.organizer.phone)}`}>
+                    <FiPhone /> {ev.whatsappContactNumber || ev.organizer.phone}
+                  </a>
+                )}
+                {ev.whatsappContactNumber && (
+                  <a className="flex items-center gap-2 text-green-700" target="_blank" rel="noopener noreferrer" href={`https://wa.me/${cleanPhone(ev.whatsappContactNumber)}`}>
+                    <FiMessageCircle /> Chat on WhatsApp
+                  </a>
+                )}
+                {ev.whatsappGroupLink ? (
+                  <a className="flex items-center gap-2 text-green-700" target="_blank" rel="noopener noreferrer" href={ev.whatsappGroupLink}>
+                    <FiUsers /> Join WhatsApp Group
+                  </a>
+                ) : (
+                  <p className="flex items-center gap-2 text-gray-500">
+                    <FiUsers /> WhatsApp group link not provided
+                  </p>
+                )}
+                {ev.organizer?.email && <a className="flex items-center gap-2 text-blue-700" href={`mailto:${ev.organizer.email}`}><FiMail /> {ev.organizer.email}</a>}
+              </div>
+            </InfoCard>
+
+            <InfoCard title="Event Facilities">
+              <div className="flex flex-wrap gap-2">
+                {facilityBadges(ev).map(label => <span key={label} className="badge badge-blue">✓ {label}</span>)}
+                {facilityBadges(ev).length === 0 && <p className="text-sm text-gray-500">No facilities have been listed by the organizer.</p>}
+              </div>
+            </InfoCard>
+
+            <div className="grid md:grid-cols-2 gap-5">
+              <InfoCard title="Food & Accommodation">
+                <DetailRows rows={[
+                  ['Food Available', ev.foodProvided ? 'Yes' : 'No'],
+                  ['Meals', ev.foodMeals || 'Not provided'],
+                  ['Food Type', foodTypeLabel(ev.foodType)],
+                  ['Accommodation', ev.accommodationProvided ? 'Available' : 'Not Available'],
+                  ['Type', accommodationTypeLabel(ev)],
+                  ['Charges', ev.accommodationCharges != null ? `₹${ev.accommodationCharges}` : 'Not provided'],
+                ]} />
+              </InfoCard>
+              <InfoCard title="Live Event Status">
+                <div className="flex items-center gap-2 text-blue-900 font-bold"><FiCheckCircle /> {computedStatus}</div>
+                <DetailRows rows={[
+                  ['Registration Deadline', formatDate(ev.registrationDeadline)],
+                  ['Start', formatDateTime(ev.eventDate, ev.eventTime)],
+                  ['End', formatDateTime(ev.endDate || ev.eventDate, ev.endTime)],
+                ]} />
+              </InfoCard>
+            </div>
+
+            <InfoCard title="Travel Guide">
+              <DetailRows rows={[
+                ['Venue Address', ev.location],
+                ['Nearest Bus Stop', ev.nearestBusStop],
+                ['Distance from Bus Stop', ev.distanceFromBusStop],
+                ['Bus Numbers', ev.busNumbers],
+                ['Nearest Railway Station', ev.nearestRailwayStation],
+                ['Distance from Railway Station', ev.distanceFromRailwayStation],
+                ['Nearest Airport', ev.nearestAirport],
+                ['Metro Availability', ev.metroInformation],
+                ['Landmarks', ev.landmarks],
+                ['Parking Availability', ev.parkingAvailable],
+              ]} />
+            </InfoCard>
+
+            <InfoCard title="Important Information">
+              <DetailRows rows={[
+                ['Reporting Time', ev.reportingTime],
+                ['Dress Code', ev.dressCode],
+                ['Items to Bring', ev.itemsToBring],
+                ['Laptop Required', ev.laptopRequired ? 'Yes' : 'No'],
+                ['ID Card Required', ev.idCardRequired ? 'Yes' : 'No'],
+                ['Team Size', ev.teamSize],
+                ['Rules', ev.rules],
+                ['Refund Policy', ev.refundPolicy],
+                ['Cancellation Policy', ev.cancellationPolicy],
+                ['Certificate Eligibility', ev.certificateEligibility],
+              ]} />
+            </InfoCard>
+
+            <InfoCard title="AI Event Assistant">
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <input value={assistantQuestion} onChange={e => setAssistantQuestion(e.target.value)} className="input-field text-sm" placeholder="Ask about this event" />
+                  <button type="button" className="btn-primary px-4" disabled={aiMutation.isLoading || !assistantQuestion.trim()} onClick={() => aiMutation.mutate(assistantQuestion)}>
+                    Ask
+                  </button>
+                </div>
+                {assistantAnswer && <p className="rounded-xl bg-blue-50 p-3 text-sm text-blue-900 whitespace-pre-line">{assistantAnswer}</p>}
+              </div>
+            </InfoCard>
+
+            <InfoCard title="Event Timeline">
+              <div className="grid gap-2 sm:grid-cols-2">
+                {timelineSteps(ev).map(step => (
+                  <div key={step.label} className={`rounded-xl border px-3 py-2 text-sm ${step.done ? 'border-green-200 bg-green-50 text-green-800' : 'border-blue-100 bg-white text-gray-600'}`}>
+                    {step.done ? '✓' : '○'} {step.label}
+                  </div>
+                ))}
+              </div>
+            </InfoCard>
+
+            <InfoCard title="Feedback">
+              {isEventCompleted(ev) ? <RatingsPanel eventId={ev.id} /> : <p className="text-sm text-gray-500">Feedback opens after the event ends.</p>}
+            </InfoCard>
+
+            <InfoCard title="Certificate">
+              <DetailRows rows={[
+                ['Certificate Available', ev.hasCertificate ? 'Yes' : 'No'],
+                ['Status', ev.hasCertificate ? (isEventCompleted(ev) ? 'Eligible after organizer release' : 'Pending') : 'Not Eligible'],
+                ['Release Date', formatDate(ev.certificateDeadline) || (isEventCompleted(ev) ? 'Available after organizer publishes' : 'After event completion')],
+              ]} />
+            </InfoCard>
+
+            <InfoCard title="Related Events">
+              {relatedEvents.length > 0 ? (
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {relatedEvents.map(item => <EventCard key={item.id} event={item} />)}
+                </div>
+              ) : <p className="text-sm text-gray-500">No related events found yet.</p>}
+            </InfoCard>
+              </>
             )}
           </div>
 
@@ -248,10 +483,133 @@ export default function EventDetail() {
                 className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl border border-blue-200 text-sm font-medium text-blue-600 hover:bg-blue-50 transition-colors">
                 <FiShare2 /> Share Event
               </button>
+
+              <div className="rounded-2xl border border-blue-100 p-4 space-y-3">
+                <p className="text-sm font-semibold text-blue-900">Share</p>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <a className="btn-outline py-2 px-3" target="_blank" rel="noopener noreferrer" href={`https://wa.me/?text=${encodeURIComponent(ev.eventName + ' ' + eventUrl)}`}>WhatsApp</a>
+                  <a className="btn-outline py-2 px-3" target="_blank" rel="noopener noreferrer" href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(eventUrl)}`}>LinkedIn</a>
+                  <a className="btn-outline py-2 px-3" href={`mailto:?subject=${encodeURIComponent(ev.eventName)}&body=${encodeURIComponent(eventUrl)}`}>Email</a>
+                </div>
+                <div className="flex justify-center bg-white p-2 rounded-xl">
+                  <QRCodeSVG value={eventUrl} size={112} />
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
   );
+}
+
+function InfoCard({ title, children }) {
+  return (
+    <div className="bg-white rounded-2xl p-6 border border-blue-100 shadow-card">
+      <h2 className="text-lg font-bold text-blue-900 mb-3">{title}</h2>
+      {children}
+    </div>
+  );
+}
+
+function DetailRows({ rows }) {
+  const visible = rows.filter(([, value]) => value !== null && value !== undefined && value !== '');
+  if (!visible.length) return <p className="text-sm text-gray-500">Not provided by organizer.</p>;
+  return (
+    <div className="grid gap-2 text-sm">
+      {visible.map(([label, value]) => (
+        <div key={label} className="grid sm:grid-cols-[180px_1fr] gap-1 border-b border-blue-50 pb-2 last:border-0">
+          <span className="font-semibold text-blue-900">{label}</span>
+          <span className="text-gray-600 whitespace-pre-line">{value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function cleanPhone(value = '') {
+  return String(value).replace(/[^\d+]/g, '');
+}
+
+function foodTypeLabel(type) {
+  if (type === 'VEG') return 'Veg';
+  if (type === 'NON_VEG') return 'Non-Veg';
+  if (type === 'BOTH') return 'Veg and Non-Veg';
+  return 'Not provided';
+}
+
+function accommodationTypeLabel(ev) {
+  const parts = [];
+  if (ev.accommodationType) parts.push(ev.accommodationType.replace(/_/g, ' '));
+  if (ev.boysHostelAvailable || ev.girlsHostelAvailable) parts.push('Hostel');
+  if (ev.hotelTieupAvailable) parts.push('Hotel');
+  if (ev.accommodationBedsAvailable) parts.push(`${ev.accommodationBedsAvailable} seats`);
+  return [...new Set(parts)].join(', ') || 'Not provided';
+}
+
+function facilityBadges(ev) {
+  return [
+    [ev.foodProvided, 'Food'],
+    [ev.accommodationProvided, 'Accommodation'],
+    [ev.parkingAvailable && ev.parkingAvailable !== 'NONE', 'Parking'],
+    [ev.wifiAvailable, 'Wi-Fi'],
+    [ev.medicalSupportAvailable, 'Medical Support'],
+    [ev.hasCertificate, 'Certificate'],
+    [ev.category === 'HACKATHON', 'Hackathon'],
+    [ev.category === 'WORKSHOP', 'Workshop'],
+    [ev.category === 'CODING_COMPETITION', 'Competition'],
+  ].filter(([enabled]) => Boolean(enabled)).map(([, label]) => label);
+}
+
+function eventStart(ev) {
+  return ev.eventDate ? new Date(`${ev.eventDate}T${ev.eventTime || '00:00:00'}`) : null;
+}
+
+function eventEnd(ev) {
+  const date = ev.endDate || ev.eventDate;
+  return date ? new Date(`${date}T${ev.endTime || '23:59:59'}`) : null;
+}
+
+function isEventCompleted(ev) {
+  const end = eventEnd(ev);
+  return ev.status === 'COMPLETED' || ev.status === 'EXPIRED' || (end && new Date() > end);
+}
+
+function getLiveStatus(ev) {
+  if (ev.status === 'CANCELLED') return 'Cancelled';
+  const now = new Date();
+  const start = eventStart(ev);
+  const end = eventEnd(ev);
+  const deadline = ev.registrationDeadline ? new Date(`${ev.registrationDeadline}T23:59:59`) : null;
+  if (end && now > end) return ev.status === 'EXPIRED' ? 'Expired' : 'Completed';
+  if (start && end && now >= start && now <= end) return 'Live Now';
+  if (deadline && now > deadline) return 'Registration Closed';
+  if (ev.availableSeats <= 0) return 'Registration Closed';
+  if (start && now < start) return 'Registration Open';
+  return 'Upcoming';
+}
+
+function timelineSteps(ev) {
+  const registered = ev.availableSeats < ev.totalSeats;
+  const paid = registered && Number(ev.ticketPrice || 0) >= 0;
+  const completed = isEventCompleted(ev);
+  return [
+    ['Registration', registered || getLiveStatus(ev) === 'Registration Open'],
+    ['Approval', ['APPROVED', 'PUBLISHED', 'LIVE', 'ONGOING', 'COMPLETED', 'EXPIRED'].includes(ev.status)],
+    ['Payment', paid],
+    ['Ticket Generated', registered],
+    ['Attend Event', completed],
+    ['Certificate Released', completed && ev.hasCertificate],
+    ['Feedback', completed],
+  ].map(([label, done]) => ({ label, done }));
+}
+
+function formatDate(value) {
+  if (!value) return '';
+  return format(new Date(value), 'MMM d, yyyy');
+}
+
+function formatDateTime(date, time) {
+  if (!date) return '';
+  return `${formatDate(date)}${time ? `, ${time}` : ''}`;
 }

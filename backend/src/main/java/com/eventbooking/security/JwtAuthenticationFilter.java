@@ -77,6 +77,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                     SecurityContextHolder.getContext().setAuthentication(auth);
 
+                    // 5. Inject expiry timestamp header so the frontend can schedule auto-logout
+                    try {
+                        long expiryMs = jwtTokenProvider.extractClaims(token).getExpiration().getTime();
+                        response.setHeader("X-Token-Expiry", String.valueOf(expiryMs));
+                    } catch (Exception ignored) {}
+
                 } catch (Exception ex) {
                     log.error("Could not set user authentication: {}", ex.getMessage());
                 }

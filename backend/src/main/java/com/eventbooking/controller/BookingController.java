@@ -2,6 +2,7 @@ package com.eventbooking.controller;
 
 import com.eventbooking.dto.request.BookingRequest;
 import com.eventbooking.dto.response.ApiResponse;
+import com.eventbooking.dto.response.AttendanceResponse;
 import com.eventbooking.dto.response.BookingResponse;
 import com.eventbooking.dto.response.PagedResponse;
 import com.eventbooking.security.AuthPrincipal;
@@ -13,6 +14,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 /**
  * REST controller for ticket booking operations.
@@ -57,6 +60,32 @@ public class BookingController {
             @AuthenticationPrincipal AuthPrincipal principal) {
         return ResponseEntity.ok(ApiResponse.success(
                 bookingService.getBookingById(id, principal.getId())));
+    }
+
+    @GetMapping("/{id}/attendance")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<ApiResponse<AttendanceResponse>> getBookingAttendance(
+            @PathVariable Long id,
+            @AuthenticationPrincipal AuthPrincipal principal) {
+        BookingResponse booking = bookingService.getBookingById(id, principal.getId());
+        List<BookingResponse.ParticipantInfo> participants = booking.getParticipants();
+        BookingResponse.ParticipantInfo firstParticipant = (participants != null && !participants.isEmpty())
+                ? participants.get(0) : null;
+        return ResponseEntity.ok(ApiResponse.success(AttendanceResponse.builder()
+                .bookingId(booking.getId())
+                .ticketId(booking.getTicketId())
+                .eventId(booking.getEvent() != null ? booking.getEvent().getId() : null)
+                .eventName(booking.getEvent() != null ? booking.getEvent().getEventName() : null)
+                .userId(booking.getUser() != null ? booking.getUser().getId() : null)
+                .participantName(firstParticipant != null ? firstParticipant.getName()
+                        : (booking.getUser() != null ? booking.getUser().getName() : null))
+                .participantEmail(firstParticipant != null ? firstParticipant.getEmail()
+                        : (booking.getUser() != null ? booking.getUser().getEmail() : null))
+                .attendanceStatus(booking.getAttendanceStatus())
+                .checkInTime(booking.getCheckInTime())
+                .checkedInBy(booking.getCheckedInBy())
+                .certificateEligible(booking.isCertificateEligible())
+                .build()));
     }
 
     @GetMapping("/ticket/{ticketId}")

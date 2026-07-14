@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { useMutation, useQuery, useQueryClient } from 'react-query';
 import { toast } from 'react-toastify';
-import { eventsAPI } from '../../services/api';
+import { certificatesAPI, eventsAPI } from '../../services/api';
 import {
   FiArrowLeft,
   FiCalendar,
@@ -24,6 +24,8 @@ export default function CreateEvent() {
   const [posterFile, setPosterFile] = useState(null);
   const [posterPreview, setPosterPreview] = useState('');
   const [authorizedFile, setAuthorizedFile] = useState(null);
+  const [certificateTemplateFile, setCertificateTemplateFile] = useState(null);
+  const [signatureFile, setSignatureFile] = useState(null);
   const {
     register,
     handleSubmit,
@@ -49,12 +51,45 @@ export default function CreateEvent() {
 
   const mutation = useMutation(
     async (formData) => {
-      const { organizationType: orgType, ...eventData } = formData;
+      const { organizationType: orgType, foodMealsArr, ...eventData } = formData;
+      const cleanedEventData = Object.fromEntries(
+        Object.entries(eventData).map(([key, value]) => [key, value === '' ? null : value])
+      );
       const created = await eventsAPI.create({
-        ...eventData,
+        ...cleanedEventData,
         ticketPrice: Number(eventData.ticketPrice),
         totalSeats: Number(eventData.totalSeats),
         hasCertificate: Boolean(eventData.hasCertificate),
+        certificateSettings: {
+          certificateAvailable: Boolean(eventData.hasCertificate),
+          automaticGeneration: Boolean(eventData.certificateAutomaticGeneration),
+          releaseMode: eventData.certificateReleaseMode || 'MANUAL',
+          releaseDate: eventData.certificateReleaseDate || null,
+          minimumAttendanceRequired: true,
+          certificateType: eventData.certificateType || 'PARTICIPATION',
+          organizerName: eventData.certificateOrganizerName || null,
+          organizationName: eventData.certificateOrganizationName || null,
+          verificationBaseUrl: null,
+          certificateExpiry: null,
+          theme: eventData.certificateTheme || 'MODERN_BLUE',
+        },
+        foodProvided: Boolean(eventData.foodProvided),
+        teaCoffeeProvided: Boolean(eventData.teaCoffeeProvided),
+        accommodationProvided: Boolean(eventData.accommodationProvided),
+        boysHostelAvailable: Boolean(eventData.boysHostelAvailable),
+        girlsHostelAvailable: Boolean(eventData.girlsHostelAvailable),
+        hotelTieupAvailable: Boolean(eventData.hotelTieupAvailable),
+        accommodationCharges: eventData.accommodationCharges ? Number(eventData.accommodationCharges) : null,
+        accommodationBedsAvailable: eventData.accommodationBedsAvailable ? Number(eventData.accommodationBedsAvailable) : null,
+        foodMeals: foodMealsArr?.length ? foodMealsArr.join(',') : null,
+        laptopRequired: Boolean(eventData.laptopRequired),
+        idCardRequired: Boolean(eventData.idCardRequired),
+        wifiAvailable: Boolean(eventData.wifiAvailable),
+        wheelchairAccessible: false,
+        restRoomsAvailable: false,
+        drinkingWaterAvailable: false,
+        medicalSupportAvailable: Boolean(eventData.medicalSupportAvailable),
+        networkingEnabled: false,
         organizerDetails: [
           `Organization type: ${orgType}`,
           eventData.organizerDetails ? `Details: ${eventData.organizerDetails}` : '',
@@ -71,6 +106,16 @@ export default function CreateEvent() {
         const upload = new FormData();
         upload.append('file', authorizedFile);
         await eventsAPI.uploadAuthorizedDocument(eventId, upload);
+      }
+      if (certificateTemplateFile && eventId) {
+        const upload = new FormData();
+        upload.append('file', certificateTemplateFile);
+        await certificatesAPI.uploadTemplate(eventId, upload, eventData.certificateOrganizerName || '');
+      }
+      if (signatureFile && eventId) {
+        const upload = new FormData();
+        upload.append('file', signatureFile);
+        await certificatesAPI.uploadSignature(eventId, upload);
       }
       return created;
     },
@@ -208,7 +253,7 @@ export default function CreateEvent() {
               </div>
             </Section>
 
-            <Section icon={<FiMapPin />} title="Location" text="Use venue details that make the event easy to find.">
+            <Section icon={<FiMapPin />} title="Location & Transportation" text="Help attendees find the venue and plan their travel.">
               <FormField label="Venue Name">
                 <input {...register('venueName')} className="input-field" placeholder="Auditorium, Seminar Hall, Online Room" />
               </FormField>
@@ -217,6 +262,113 @@ export default function CreateEvent() {
               </FormField>
               <FormField label="Google Maps URL">
                 <input {...register('googleMapsUrl')} type="url" className="input-field" placeholder="https://maps.google.com/..." />
+              </FormField>
+              <div className="grid gap-3 md:grid-cols-2">
+                <FormField label="WhatsApp Group Link">
+                  <input {...register('whatsappGroupLink')} type="url" className="input-field" placeholder="https://chat.whatsapp.com/..." />
+                </FormField>
+                <FormField label="WhatsApp Contact Number">
+                  <input {...register('whatsappContactNumber')} className="input-field" placeholder="+91 98765 43210" />
+                </FormField>
+              </div>
+              <div className="border-t border-slate-100 pt-4 mt-2">
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">Transportation Guidance</p>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <FormField label="Nearest Bus Stop">
+                    <input {...register('nearestBusStop')} className="input-field" placeholder="e.g. Gandhi Nagar Bus Stand" />
+                  </FormField>
+                  <FormField label="Distance from Bus Stop">
+                    <input {...register('distanceFromBusStop')} className="input-field" placeholder="e.g. 200 meters" />
+                  </FormField>
+                  <FormField label="Bus Numbers">
+                    <input {...register('busNumbers')} className="input-field" placeholder="e.g. 21G, 45A" />
+                  </FormField>
+                  <FormField label="Nearest Railway Station">
+                    <input {...register('nearestRailwayStation')} className="input-field" placeholder="e.g. Chennai Central — 3 km" />
+                  </FormField>
+                  <FormField label="Distance from Railway Station">
+                    <input {...register('distanceFromRailwayStation')} className="input-field" placeholder="e.g. 3 km" />
+                  </FormField>
+                  <FormField label="Parking Available">
+                    <select {...register('parkingAvailable')} className="input-field">
+                      <option value="">Select</option>
+                      <option value="FREE">Free Parking</option>
+                      <option value="PAID">Paid Parking</option>
+                      <option value="NONE">No Parking</option>
+                      <option value="LIMITED">Limited Parking</option>
+                    </select>
+                  </FormField>
+                  <FormField label="Estimated Travel Time">
+                    <input {...register('estimatedTravelTime')} className="input-field" placeholder="25 minutes from central bus stand" />
+                  </FormField>
+                  <FormField label="Cab Estimate">
+                    <input {...register('cabEstimate')} className="input-field" placeholder="Rs. 250-350 from railway station" />
+                  </FormField>
+                </div>
+                <FormField label="Travel / Route Details">
+                  <textarea {...register('travelGuide')} rows={3} className="input-field resize-none"
+                    placeholder="How to reach the venue — bus routes, directions from landmark, cab booking tip…" />
+                </FormField>
+                <FormField label="Landmarks">
+                  <textarea {...register('landmarks')} rows={2} className="input-field resize-none" placeholder="Main gate, nearby building, signal, or recognizable landmark" />
+                </FormField>
+                <FormField label="Nearby Hotels">
+                  <textarea {...register('nearbyHotels')} rows={2} className="input-field resize-none" placeholder="Hotel names, distance, contact details" />
+                </FormField>
+                <FormField label="Nearby Restaurants">
+                  <textarea {...register('nearbyRestaurants')} rows={2} className="input-field resize-none" placeholder="Restaurant names, cuisine, distance" />
+                </FormField>
+              </div>
+            </Section>
+
+            <Section icon={<FiCalendar />} title="Schedule & Live Mode" text="Optional details shown on event day.">
+              <FormField label="Session Schedule">
+                <textarea {...register('sessionSchedule')} rows={3} className="input-field resize-none" placeholder="10:00 AM Inauguration&#10;11:00 AM Workshop" />
+              </FormField>
+              <FormField label="Speaker List">
+                <textarea {...register('speakerList')} rows={2} className="input-field resize-none" placeholder="Speaker name - role/topic" />
+              </FormField>
+              <FormField label="Live Announcements">
+                <textarea {...register('liveAnnouncements')} rows={2} className="input-field resize-none" placeholder="Check-in gate, help desk, room changes" />
+              </FormField>
+            </Section>
+
+            <Section icon={<FiCheckCircle />} title="Important Information" text="Add participant requirements, rules, and policies.">
+              <div className="grid gap-4 md:grid-cols-2">
+                <FormField label="Reporting Time">
+                  <input {...register('reportingTime')} type="time" className="input-field" />
+                </FormField>
+                <FormField label="Dress Code">
+                  <input {...register('dressCode')} className="input-field" placeholder="Formal, college uniform, sportswear" />
+                </FormField>
+                <FormField label="Team Size">
+                  <input {...register('teamSize')} className="input-field" placeholder="Solo, 2-4 members, maximum 5" />
+                </FormField>
+                <FormField label="Certificate Eligibility">
+                  <input {...register('certificateEligibility')} className="input-field" placeholder="Attend full event, submit project, etc." />
+                </FormField>
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-700">
+                  <input {...register('laptopRequired')} type="checkbox" className="accent-teal-600" />
+                  Laptop required
+                </label>
+                <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-700">
+                  <input {...register('idCardRequired')} type="checkbox" className="accent-teal-600" />
+                  ID card required
+                </label>
+              </div>
+              <FormField label="Items to Bring">
+                <textarea {...register('itemsToBring')} rows={2} className="input-field resize-none" placeholder="Laptop, charger, ID card, notebook" />
+              </FormField>
+              <FormField label="Rules">
+                <textarea {...register('rules')} rows={3} className="input-field resize-none" placeholder="Participation rules and conduct guidelines" />
+              </FormField>
+              <FormField label="Refund Policy">
+                <textarea {...register('refundPolicy')} rows={2} className="input-field resize-none" placeholder="Refund terms, cutoff dates, non-refundable fees" />
+              </FormField>
+              <FormField label="Cancellation Policy">
+                <textarea {...register('cancellationPolicy')} rows={2} className="input-field resize-none" placeholder="Cancellation terms and organizer contact path" />
               </FormField>
             </Section>
           </div>
@@ -271,17 +423,147 @@ export default function CreateEvent() {
               </label>
             </Section>
 
-            <Section icon={<FiCheckCircle />} title="Publish Settings" text="Save as a draft or publish immediately.">
-              <FormField label="Status">
+            <Section icon={<FiCheckCircle />} title="Certificate Settings" text="Configure certificate generation and release.">
+              <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-700">
+                <input {...register('certificateAutomaticGeneration')} type="checkbox" className="accent-teal-600" />
+                Automatic certificate generation
+              </label>
+              <FormField label="Release Mode">
+                <select {...register('certificateReleaseMode')} className="input-field">
+                  <option value="IMMEDIATE_AFTER_EVENT">Immediately after event ends</option>
+                  <option value="MANUAL">Manual release by organizer</option>
+                  <option value="SCHEDULED">Scheduled release</option>
+                </select>
+              </FormField>
+              <FormField label="Release Date">
+                <input {...register('certificateReleaseDate')} type="date" className="input-field" />
+              </FormField>
+              <FormField label="Certificate Type">
+                <select {...register('certificateType')} className="input-field">
+                  {['PARTICIPATION','WINNER','RUNNER_UP','VOLUNTEER','ORGANIZER','SPEAKER'].map(type => (
+                    <option key={type} value={type}>{type.replace(/_/g, ' ')}</option>
+                  ))}
+                </select>
+              </FormField>
+              <FormField label="Built-in Theme">
+                <select {...register('certificateTheme')} className="input-field">
+                  <option value="MODERN_BLUE">Modern Blue</option>
+                  <option value="CLASSIC_GOLD">Classic Gold</option>
+                  <option value="MINIMAL_TEAL">Minimal Teal</option>
+                </select>
+              </FormField>
+              <FormField label="Organizer Name">
+                <input {...register('certificateOrganizerName')} className="input-field" placeholder="Name shown on certificate" />
+              </FormField>
+              <FormField label="Organization Name">
+                <input {...register('certificateOrganizationName')} className="input-field" placeholder="Organization shown on certificate" />
+              </FormField>
+            </Section>
+
+            <Section icon={<FiCheckCircle />} title="Food & Accommodation" text="Specify meals and lodging for participants.">
+              <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-700">
+                <input {...register('foodProvided')} type="checkbox" className="accent-teal-600" />
+                Food will be provided
+              </label>
+              {watch('foodProvided') && (
+                <>
+                  <FormField label="Meals Provided">
+                    <div className="flex flex-wrap gap-2">
+                      {['BREAKFAST','LUNCH','DINNER','SNACKS'].map(m => (
+                        <label key={m} className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold cursor-pointer hover:bg-teal-50">
+                          <input type="checkbox" value={m} {...register('foodMealsArr')} className="accent-teal-600" />
+                          {m}
+                        </label>
+                      ))}
+                    </div>
+                  </FormField>
+                  <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-700">
+                    <input {...register('teaCoffeeProvided')} type="checkbox" className="accent-teal-600" />
+                    Tea / Coffee provided
+                  </label>
+                  <FormField label="Food Type">
+                    <select {...register('foodType')} className="input-field">
+                      <option value="">Select</option>
+                      <option value="VEG">Veg Only</option>
+                      <option value="NON_VEG">Non-Veg Only</option>
+                      <option value="BOTH">Both Veg & Non-Veg</option>
+                    </select>
+                  </FormField>
+                  <FormField label="Special Diet Notes">
+                    <input {...register('specialDiet')} className="input-field" placeholder="Jain, vegan, allergies, gluten-free" />
+                  </FormField>
+                </>
+              )}
+              <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-700">
+                <input {...register('accommodationProvided')} type="checkbox" className="accent-teal-600" />
+                Accommodation available
+              </label>
+              {watch('accommodationProvided') && (
+                <>
+                  <FormField label="Accommodation Type">
+                    <select {...register('accommodationType')} className="input-field">
+                      <option value="">Select</option>
+                      <option value="HOSTEL">Hostel</option>
+                      <option value="HOTEL">Hotel</option>
+                      <option value="BOTH">Hostel + Hotel</option>
+                    </select>
+                  </FormField>
+                  <div className="grid gap-2">
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-700">
+                      <input {...register('boysHostelAvailable')} type="checkbox" className="accent-teal-600" />
+                      Boys hostel available
+                    </label>
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-700">
+                      <input {...register('girlsHostelAvailable')} type="checkbox" className="accent-teal-600" />
+                      Girls hostel available
+                    </label>
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-700">
+                      <input {...register('hotelTieupAvailable')} type="checkbox" className="accent-teal-600" />
+                      Hotel tie-up available
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormField label="Beds Available">
+                      <input {...register('accommodationBedsAvailable')} type="number" min="0" className="input-field" placeholder="50" />
+                    </FormField>
+                    <FormField label="Charges (Rs. 0 = Free)">
+                      <input {...register('accommodationCharges')} type="number" min="0" className="input-field" placeholder="0" />
+                    </FormField>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormField label="Check-in">
+                      <input {...register('accommodationCheckIn')} className="input-field" placeholder="8:00 AM" />
+                    </FormField>
+                    <FormField label="Check-out">
+                      <input {...register('accommodationCheckOut')} className="input-field" placeholder="6:00 PM" />
+                    </FormField>
+                  </div>
+                  <FormField label="Contact Person">
+                    <input {...register('accommodationContactPerson')} className="input-field" placeholder="Name and phone number" />
+                  </FormField>
+                  <FormField label="Accommodation Details">
+                    <textarea {...register('accommodationDetails')} rows={2} className="input-field resize-none" placeholder="Address, contact, check-in time…" />
+                  </FormField>
+                </>
+              )}
+            </Section>
+
+            <Section icon={<FiCheckCircle />} title="Facilities" text="Enable only the facilities available at the event.">
+              {[
+                ['wifiAvailable', 'Wi-Fi'],
+                ['medicalSupportAvailable', 'Medical support'],
+              ].map(([name, label]) => (
+                <label key={name} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-700">
+                  <input {...register(name)} type="checkbox" className="accent-teal-600" />
+                  {label}
+                </label>
+              ))}
+            </Section>
+
+            <Section icon={<FiCheckCircle />} title="Publish Settings" text="Save as a draft or publish immediately.">              <FormField label="Status">
                 <select {...register('status')} className="input-field">
                   <option value="DRAFT">Draft</option>
                   <option value="PUBLISHED">Publish Now</option>
-                </select>
-              </FormField>
-              <FormField label="Visibility">
-                <select {...register('visibility')} className="input-field">
-                  <option value="PUBLIC">Public</option>
-                  <option value="PRIVATE">Private</option>
                 </select>
               </FormField>
               <div className="flex gap-3">

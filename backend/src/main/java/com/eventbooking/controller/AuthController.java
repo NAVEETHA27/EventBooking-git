@@ -37,6 +37,8 @@ public class AuthController {
     private final EmailService        emailService;
     private final UserRepository      userRepository;
     private final OrganizerRepository organizerRepository;
+    private final com.eventbooking.security.RateLimiterService rateLimiterService;
+    private final org.springframework.core.env.Environment env;
 
     @Value("${spring.mail.username:NOT_CONFIGURED}")
     private String mailUsername;
@@ -53,7 +55,13 @@ public class AuthController {
 
     @PostMapping("/user/login")
     public ResponseEntity<ApiResponse<AuthResponse>> loginUser(
-            @Valid @RequestBody LoginRequest request) {
+            @Valid @RequestBody LoginRequest request,
+            jakarta.servlet.http.HttpServletRequest httpRequest) {
+        String ip = httpRequest.getRemoteAddr();
+        if (!rateLimiterService.isAllowed("login:" + ip, 10, 60_000)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many login attempts. Please try again in a minute."));
+        }
         return ResponseEntity.ok(ApiResponse.success("Login successful", authService.loginUser(request)));
     }
 
@@ -69,7 +77,13 @@ public class AuthController {
 
     @PostMapping("/organizer/login")
     public ResponseEntity<ApiResponse<AuthResponse>> loginOrganizer(
-            @Valid @RequestBody LoginRequest request) {
+            @Valid @RequestBody LoginRequest request,
+            jakarta.servlet.http.HttpServletRequest httpRequest) {
+        String ip = httpRequest.getRemoteAddr();
+        if (!rateLimiterService.isAllowed("login:" + ip, 10, 60_000)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many login attempts. Please try again in a minute."));
+        }
         return ResponseEntity.ok(ApiResponse.success("Login successful", authService.loginOrganizer(request)));
     }
 
@@ -117,6 +131,47 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.success("Password reset successfully.", null));
     }
 
+    // ── Session Status ─────────────────────────────────────────────────────
+
+    /**
+     * GET /auth/session-status
+     *
+     * Lightweight endpoint the frontend polls (or hits on tab focus) to confirm
+     * the session is still valid. Returns the current token's expiry time so
+     * the UI can schedule the auto-logout timer precisely.
+     *
+     * Response codes:
+     *   200 — session active, body contains expiresAt (epoch ms) and remainingMs
+     *   401 — TOKEN_EXPIRED (handled by JwtAuthenticationFilter before this runs)
+     */
+    @GetMapping("/session-status")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> sessionStatus(
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(ApiResponse.error("No token provided"));
+        }
+        String token = authHeader.substring(7);
+        try {
+            long expiryMs   = jwtTokenProvider.extractClaims(token).getExpiration().getTime();
+            long remainingMs = Math.max(0, expiryMs - System.currentTimeMillis());
+            String role      = jwtTokenProvider.extractRole(token);
+            Long   id        = jwtTokenProvider.extractId(token);
+
+            return ResponseEntity.ok(ApiResponse.success("Session active", Map.of(
+                    "active",      true,
+                    "expiresAt",   expiryMs,
+                    "remainingMs", remainingMs,
+                    "expiresIn",   jwtTokenProvider.getExpirationMs(),
+                    "role",        role,
+                    "userId",      id
+            )));
+        } catch (Exception ex) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(ApiResponse.error("TOKEN_EXPIRED"));
+        }
+    }
+
     // ── Token Refresh ──────────────────────────────────────────────────────
 
     @PostMapping("/refresh-token")
@@ -143,6 +198,7 @@ public class AuthController {
                 .refreshToken(jwtTokenProvider.generateRefreshToken(id, email, role))
                 .tokenType("Bearer")
                 .expiresIn(jwtTokenProvider.getExpirationMs())
+                .expiresAt(System.currentTimeMillis() + jwtTokenProvider.getExpirationMs())
                 .build();
 
         return ResponseEntity.ok(ApiResponse.success("Token refreshed successfully", authResponse));
@@ -151,12 +207,32 @@ public class AuthController {
     // ── OTP: Send ──────────────────────────────────────────────────────────
 
     @PostMapping("/otp/send")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> sendOtp(@RequestBody Map<String, String> body) {
+    public ResponseEntity<ApiResponse<Map<String, Object>>> sendOtp(
+            @RequestBody Map<String, String> body,
+            jakarta.servlet.http.HttpServletRequest httpRequest) {
         String email = body.get("email");
         String role = body.getOrDefault("role", "USER");
 
         if (email == null || email.isBlank()) {
             return ResponseEntity.badRequest().body(ApiResponse.error("Email is required"));
+        }
+
+        if (otpStore.hasPending(email)) {
+            return ResponseEntity.ok(ApiResponse.success("An OTP is already pending. Please check your inbox.",
+                    Map.of("emailSent", false, "pending", true)));
+        }
+
+        // Rate limit OTP requests to 1 request per 60 seconds per email
+        if (!rateLimiterService.isAllowed("otp_email:" + email.toLowerCase(), 1, 60_000)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Please wait 60 seconds before requesting another OTP."));
+        }
+
+        // Rate limit OTP requests to 10 requests per hour per IP (prevent abuse)
+        String ip = httpRequest.getRemoteAddr();
+        if (!rateLimiterService.isAllowed("otp_ip:" + ip, 10, 3600_000)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many OTP requests from this IP. Please try again later."));
         }
 
         String otp = otpStore.generate(email);
@@ -179,11 +255,29 @@ public class AuthController {
             return ResponseEntity.ok(ApiResponse.success("OTP sent to " + email,
                     Map.of("emailSent", true)));
         } catch (Exception emailEx) {
-            log.warn("[OTP] Email delivery failed for {}. Cause: {}", email, emailEx.getMessage());
-            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(ApiResponse.error(
-                    "Could not send OTP email. Configure MAIL_USERNAME and MAIL_PASSWORD " +
-                    "(Gmail App Password) and try again."));
+            // Log full cause chain so we can diagnose SMTP auth failures
+            Throwable root = emailEx;
+            while (root.getCause() != null) root = root.getCause();
+            log.error("[OTP] Email delivery failed for {} — root cause: {} — {}", email,
+                    root.getClass().getSimpleName(), root.getMessage());
+            String hint = buildSmtpHint(emailEx.getMessage());
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(ApiResponse.error(hint));
         }
+    }
+
+    private String buildSmtpHint(String msg) {
+        if (msg == null) msg = "";
+        if (msg.contains("535") || msg.contains("Username and Password not accepted") || msg.contains("BadCredentials"))
+            return "Gmail authentication failed. Your App Password is invalid or expired. " +
+                   "Go to myaccount.google.com/apppasswords, generate a NEW App Password, " +
+                   "and update spring.mail.password in application-local.yml.";
+        if (msg.contains("534") || msg.contains("less secure") || msg.contains("application-specific"))
+            return "Gmail requires an App Password (2-Step Verification must be ON). " +
+                   "Generate one at myaccount.google.com/apppasswords.";
+        if (msg.contains("Connection refused") || msg.contains("timeout"))
+            return "SMTP connection failed — check your network/firewall. Gmail SMTP: smtp.gmail.com:587.";
+        return "Could not send OTP email. Configure MAIL_USERNAME and MAIL_PASSWORD " +
+               "(Gmail App Password) and try again. Check backend logs for the exact SMTP error.";
     }
 
     // OTP: Verify ────────────────────────────────────────────────────────
@@ -214,9 +308,13 @@ public class AuthController {
 
     // ── Test Email (dev only) ─────────────────────────────────────────────
     @GetMapping("/test-email")
-    @Profile("dev")
     public ResponseEntity<ApiResponse<Map<String, Object>>> testEmail(
             @RequestParam(defaultValue = "") String to) {
+        if (!java.util.Arrays.asList(env.getActiveProfiles()).contains("dev")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(ApiResponse.error("Access denied: Test email is disabled in this profile."));
+        }
+
         String target = to.isBlank() ? mailUsername : to;
 
         if (target.isBlank() || target.equals("NOT_CONFIGURED")) {

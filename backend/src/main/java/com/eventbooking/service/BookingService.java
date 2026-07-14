@@ -40,6 +40,7 @@ public class BookingService {
     private final EventRepository     eventRepository;
     private final UserRepository      userRepository;
     private final PaymentRepository   paymentRepository;
+    private final CertificateRepository certificateRepository;
     private final RefundRepository    refundRepository;
     private final ParticipantRepository participantRepository;
     private final BookingQueueRepository bookingQueueRepository;
@@ -47,10 +48,12 @@ public class BookingService {
     private final EmailService        emailService;
     private final QrCodeGenerator     qrCodeGenerator;
     private final AuditService auditService;
+    private final BookingTransactionHelper bookingTransactionHelper;
 
     // ─── BOOK TICKETS ─────────────────────────────────────────────────────
 
     @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "recommendations", allEntries = true)
     public BookingResponse bookTickets(Long userId, BookingRequest request) {
         LocalDateTime requestTimestamp = LocalDateTime.now();
         BookingQueueEntry queueEntry = bookingQueueRepository.save(BookingQueueEntry.builder()
@@ -68,14 +71,17 @@ public class BookingService {
         Event event = eventRepository.findByIdForUpdate(request.getEventId())
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found"));
 
-        if (event.getStatus() == Event.EventStatus.CANCELLED
-                || event.getStatus() == Event.EventStatus.COMPLETED
-                || event.getStatus() == Event.EventStatus.EXPIRED
-                || event.getEventDate().isBefore(java.time.LocalDate.now())
-                || event.getStatus() != Event.EventStatus.PUBLISHED) {
+        if (!isBookable(event)) {
             queueEntry.setBookingStatus(BookingQueueEntry.QueueStatus.FAILED);
             queueEntry.setMessage("Booking is not available for this event");
             throw new BookingException("Booking is not available for this event");
+        }
+
+        if (bookingRepository.findActiveBooking(userId, event.getId()).isPresent()) {
+            queueEntry.setBookingStatus(BookingQueueEntry.QueueStatus.FAILED);
+            queueEntry.setMessage("You already have an active booking for this event");
+            bookingQueueRepository.save(queueEntry);
+            throw new DuplicateResourceException("You already have an active booking for this event");
         }
 
         if (event.getAvailableSeats() < request.getQuantity()) {
@@ -100,11 +106,7 @@ public class BookingService {
                 .ticketStatus(Booking.TicketStatus.ACTIVE)
                 .build();
 
-        try {
-            booking.setQrCodePath(qrCodeGenerator.generate(ticketId));
-        } catch (Exception ex) {
-            log.warn("QR generation failed for ticket {}: {}", ticketId, ex.getMessage());
-        }
+        // QR is NOT generated here — generated only after payment succeeds
 
         Booking savedBooking = bookingRepository.save(booking);
         List<Participant> participants = participantRequests.stream()
@@ -164,6 +166,7 @@ public class BookingService {
         booking.setTicketStatus(Booking.TicketStatus.CANCELLED);
         booking.setCancellationReason(reason);
         booking.setCancelledAt(LocalDateTime.now());
+        booking.setQrCodePath(null); // invalidate QR on cancellation
         bookingRepository.save(booking);
 
         Event event = booking.getEvent();
@@ -201,6 +204,12 @@ public class BookingService {
                 .orElseThrow(() -> new ResourceNotFoundException("Payment not found"));
         booking.setBookingStatus(Booking.BookingStatus.CONFIRMED);
         booking.setTicketStatus(Booking.TicketStatus.ACTIVE);
+        // Generate QR only now that payment is confirmed
+        try {
+            booking.setQrCodePath(qrCodeGenerator.generate(booking.getTicketId()));
+        } catch (Exception ex) {
+            log.warn("QR generation failed for ticket {}: {}", booking.getTicketId(), ex.getMessage());
+        }
         payment.setPaymentStatus(Payment.PaymentStatus.SUCCESSFUL);
         payment.setGatewayReference("GW-" + UUID.randomUUID().toString().substring(0, 12).toUpperCase());
         paymentRepository.save(payment);
@@ -214,22 +223,26 @@ public class BookingService {
 
     // ─── RELEASE EXPIRED RESERVATIONS (called by BookingScheduler) ───────
 
+    /**
+     * Runs every 60 seconds to release seat reservations for timed-out payments.
+     *
+     * Each expired booking is processed in its own REQUIRES_NEW transaction so:
+     * - A deadlock on one booking does not roll back all others
+     * - Lock duration is minimised (one row at a time)
+     * - No SELECT FOR UPDATE on the events table (uses direct UPDATE instead)
+     */
     @Transactional
     public void releaseExpiredPaymentReservations() {
         LocalDateTime cutoff = LocalDateTime.now().minusMinutes(10);
-        for (Booking booking : bookingRepository.findByBookingStatusAndBookedAtBefore(Booking.BookingStatus.PENDING, cutoff)) {
-            booking.setBookingStatus(Booking.BookingStatus.EXPIRED);
-            booking.setTicketStatus(Booking.TicketStatus.EXPIRED);
-            booking.setExpiredAt(LocalDateTime.now());
-            Event event = eventRepository.findByIdForUpdate(booking.getEvent().getId()).orElse(booking.getEvent());
-            event.setAvailableSeats(Math.min(event.getTotalSeats(), event.getAvailableSeats() + booking.getQuantity()));
-            paymentRepository.findByBookingId(booking.getId()).ifPresent(payment -> {
-                payment.setPaymentStatus(Payment.PaymentStatus.FAILED);
-                payment.setFailureReason("Payment timeout");
-                paymentRepository.save(payment);
-            });
-            bookingRepository.save(booking);
-            eventRepository.save(event);
+        List<Booking> expired = bookingRepository
+                .findByBookingStatusAndBookedAtBefore(Booking.BookingStatus.PENDING, cutoff);
+        for (Booking booking : expired) {
+            try {
+                bookingTransactionHelper.releaseOneExpiredBooking(booking.getId());
+            } catch (Exception ex) {
+                log.warn("[BookingService] Could not release expired booking {}: {}",
+                        booking.getId(), ex.getMessage());
+            }
         }
     }
 
@@ -275,6 +288,12 @@ public class BookingService {
                 .id(b.getId()).ticketId(b.getTicketId())
                 .quantity(b.getQuantity()).totalAmount(b.getTotalAmount())
                 .bookingStatus(b.getBookingStatus()).ticketStatus(b.getTicketStatus())
+                .attendanceStatus(b.getAttendanceStatus()).checkInTime(b.getCheckInTime())
+                .checkedInBy(b.getCheckedInBy()).certificateEligible(b.isCertificateEligible())
+                .certificateId(certificateRepository.findByEventIdAndUserId(e.getId(), b.getUser().getId())
+                        .map(c -> c.getCertificateId()).orElse(null))
+                .certificateStatus(certificateRepository.findByEventIdAndUserId(e.getId(), b.getUser().getId())
+                        .map(c -> c.getStatus().name()).orElse(null))
                 .qrCodePath(b.getQrCodePath()).bookedAt(b.getBookedAt())
                 .cancelledAt(b.getCancelledAt()).expiredAt(b.getExpiredAt())
                 .cancellationReason(b.getCancellationReason())
@@ -288,6 +307,7 @@ public class BookingService {
                         .toList())
                 .event(e != null ? BookingResponse.EventInfo.builder()
                         .id(e.getId()).eventName(e.getEventName())
+                        .status(e.getStatus() != null ? e.getStatus().name() : null)
                         .eventDate(e.getEventDate() != null ? e.getEventDate().toString() : null)
                         .eventTime(e.getEventTime() != null ? e.getEventTime().toString() : null)
                         .location(e.getLocation()).venueName(e.getVenueName())
@@ -332,5 +352,16 @@ public class BookingService {
                 throw new DuplicateResourceException("Participant already registered for this event: " + email);
             }
         }
+    }
+
+    private boolean isBookable(Event event) {
+        if (event == null || event.getStatus() == null || event.getEventDate() == null) return false;
+        if (event.getEventDate().isBefore(java.time.LocalDate.now())) return false;
+        if (event.getRegistrationDeadline() != null
+                && event.getRegistrationDeadline().isBefore(java.time.LocalDate.now())) return false;
+        return event.getStatus() == Event.EventStatus.PUBLISHED
+                || event.getStatus() == Event.EventStatus.UPCOMING
+                || event.getStatus() == Event.EventStatus.LIVE
+                || event.getStatus() == Event.EventStatus.ONGOING;
     }
 }

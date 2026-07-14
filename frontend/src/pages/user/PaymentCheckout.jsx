@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from 'react-query';
 import { motion, AnimatePresence } from 'framer-motion';
-import { bookingsAPI, paymentsAPI } from '../../services/api';
+import { bookingsAPI, paymentsAPI, getApiErrorMessage } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { toast } from 'react-toastify';
 import {
@@ -17,14 +17,11 @@ const fmt = (v) => new Intl.NumberFormat('en-IN', {
   style: 'currency', currency: 'INR', maximumFractionDigits: 2
 }).format(Number(v || 0));
 
-const PLATFORM_FEE_RATE = 0.02;
-const GST_RATE          = 0.18;
-
 function calcFees(baseAmount) {
   const base     = Number(baseAmount || 0);
-  const platform = parseFloat((base * PLATFORM_FEE_RATE).toFixed(2));
-  const gst      = parseFloat((platform * GST_RATE).toFixed(2));
-  const total    = parseFloat((base + platform + gst).toFixed(2));
+  const platform = 0;
+  const gst      = 0;
+  const total    = base;
   return { base, platform, gst, total };
 }
 
@@ -262,9 +259,29 @@ export default function PaymentCheckout() {
       const loaded = await loadRazorpay();
       if (!loaded) throw new Error('Could not load Razorpay. Check your connection.');
 
-      const orderRes = await paymentsAPI.createRazorpayOrder(bookingId);
-      const order    = orderRes.data?.data;
-      if (!order?.keyId || !order?.orderId) throw new Error('Razorpay order creation failed.');
+      let orderRes;
+      try {
+        orderRes = await paymentsAPI.createRazorpayOrder(bookingId);
+      } catch (orderErr) {
+        // If the backend says payment is already successful, treat it as success
+        const backendMsg = getApiErrorMessage(orderErr, '');
+        if (backendMsg.toLowerCase().includes('already successful')) {
+          qc.invalidateQueries(['checkout', bookingId]);
+          qc.invalidateQueries(['booking', bookingId]);
+          qc.invalidateQueries('my-bookings');
+          qc.invalidateQueries('dash-bookings');
+          qc.invalidateQueries('payments');
+          qc.invalidateQueries('notifs');
+          setPS('SUCCESS');
+          toast.success('Payment already confirmed!');
+          setTimeout(() => navigate(`/bookings/${bookingId}`, {replace:true}), 1800);
+          return;
+        }
+        throw orderErr;
+      }
+
+      const order = orderRes.data?.data;
+      if (!order?.keyId || !order?.orderId) throw new Error('Razorpay order creation failed. Please try again.');
 
       setPS('REDIRECT');
 
@@ -288,6 +305,7 @@ export default function PaymentCheckout() {
               paymentMethod:     'RAZORPAY',
             });
             setResult(vRes.data?.data);
+            if (vRes.data?.data) qc.setQueryData(['checkout', bookingId], vRes.data.data);
             qc.invalidateQueries(['checkout', bookingId]);
             qc.invalidateQueries(['booking', bookingId]);
             qc.invalidateQueries('my-bookings');
@@ -297,8 +315,10 @@ export default function PaymentCheckout() {
             setPS('SUCCESS');
             toast.success('Payment verified and confirmed!');
           } catch (vErr) {
-            setErr(vErr?.response?.data?.message || 'Verification failed. Contact support.');
+            const vMsg = getApiErrorMessage(vErr, 'Verification failed. Contact support.');
+            setErr(vMsg);
             setPS('FAILED');
+            toast.error(vMsg);
           }
         },
         modal: {
@@ -333,7 +353,7 @@ export default function PaymentCheckout() {
 
       rzp.open();
     } catch (err) {
-      const msg = err?.response?.data?.message || err?.message || 'Payment could not be started.';
+      const msg = getApiErrorMessage(err, 'Payment could not be started.');
       setErr(msg); setPS('FAILED'); toast.error(msg);
     }
   }, [bookingId, booking, isFree, isPaying, alreadyConfirmed, method, user, navigate, qc]);

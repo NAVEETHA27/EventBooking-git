@@ -42,7 +42,7 @@ const QUICK_LINKS = [
 
 const WELCOME = {
   role: 'assistant',
-  content: "Hi! I'm your **Event AI Assistant**. I can help with events, bookings, refunds, payments, organizer tools, and FAQs.\n\nWhat would you like to know?",
+  content: "Hey! I'm here to help with events, bookings, payments, refunds, and anything else on the platform.\n\nWhat can I help you with?",
   timestamp: new Date().toISOString(),
 };
 
@@ -51,6 +51,8 @@ export default function ChatbotWidget({ preloadQuestion }) {
   const navigate  = useNavigate();
   const { user }  = useAuth();
   const [open, setOpen]   = useState(false);
+  const [minimized, setMinimized] = useState(false);
+  const [position, setPosition] = useState(() => ({ x: Math.max(window.innerWidth - 460, 16), y: Math.max(window.innerHeight - 720, 16) }));
   const [input, setInput] = useState('');
   const [showJump, setShowJump] = useState(false);
   const [lastPrompt, setLastPrompt] = useState('');
@@ -59,6 +61,7 @@ export default function ChatbotWidget({ preloadQuestion }) {
   const bottomRef  = useRef(null);
   const inputRef   = useRef(null);
   const askResetRef = useRef(null);
+  const dragRef = useRef(null);
 
   const [messages, setMessages] = useState(() => {
     try { return JSON.parse(sessionStorage.getItem('eb_ai_chat') || 'null') || [WELCOME]; }
@@ -130,9 +133,37 @@ export default function ChatbotWidget({ preloadQuestion }) {
     return () => window.removeEventListener('eb:chat-refresh', resetConversation);
   }, [resetConversation]);
 
+  useEffect(() => {
+    const onResize = () => setPosition(p => clampPosition(p));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const startDrag = (event) => {
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const origin = position;
+    dragRef.current = { startX, startY, origin };
+    const onMove = (moveEvent) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      setPosition(clampPosition({
+        x: drag.origin.x + moveEvent.clientX - drag.startX,
+        y: drag.origin.y + moveEvent.clientY - drag.startY,
+      }));
+    };
+    const onUp = () => {
+      dragRef.current = null;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
   const history = useMemo(() =>
     messages.filter(m => m.role === 'user' || m.role === 'assistant')
-      .slice(-8).map(m => ({ role: m.role, content: m.content })),
+      .slice(-20).map(m => ({ role: m.role, content: m.content })),
     [messages]
   );
 
@@ -199,12 +230,13 @@ export default function ChatbotWidget({ preloadQuestion }) {
       {/* ── Chat panel ──────────────────────────────────────── */}
       {open && (
         <div
-          className="fixed bottom-6 right-6 z-50 flex h-[min(680px,calc(100vh-3rem))] w-[calc(100vw-2rem)] max-w-[420px] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg"
+          className={`fixed z-50 flex w-[calc(100vw-2rem)] max-w-[420px] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg ${minimized ? 'h-auto' : 'h-[min(680px,calc(100vh-3rem))]'}`}
+          style={{ left: position.x, top: position.y }}
           role="dialog"
           aria-label="AI Assistant"
         >
           {/* Header — same style as FAQ section headings */}
-          <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
+          <div onPointerDown={startDrag} className="flex cursor-move items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
             <div className="flex items-center gap-2.5">
               <AILogo size={24} />
               <div>
@@ -217,6 +249,10 @@ export default function ChatbotWidget({ preloadQuestion }) {
                 className="rounded p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-300">
                 <FiRefreshCw className="h-4 w-4" />
               </button>
+              <button onClick={() => setMinimized(v => !v)} title={minimized ? 'Expand' : 'Minimize'} aria-label={minimized ? 'Expand chat' : 'Minimize chat'}
+                className="rounded p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-300">
+                <FiArrowDown className={`h-4 w-4 transition ${minimized ? 'rotate-180' : ''}`} />
+              </button>
               <button onClick={() => setOpen(false)} title="Close" aria-label="Close chat"
                 className="rounded p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-300">
                 <FiX className="h-4 w-4" />
@@ -224,6 +260,7 @@ export default function ChatbotWidget({ preloadQuestion }) {
             </div>
           </div>
 
+          {!minimized && (<>
           {/* Message area */}
           <div
             ref={scrollRef}
@@ -347,10 +384,20 @@ export default function ChatbotWidget({ preloadQuestion }) {
               <p className="mt-1 text-right text-[10px] text-slate-400">{input.length}/1200 · Shift+Enter for new line</p>
             </div>
           </div>
+          </>)}
         </div>
       )}
     </>
   );
+}
+
+function clampPosition(pos) {
+  const width = Math.min(420, window.innerWidth - 32);
+  const height = Math.min(680, window.innerHeight - 48);
+  return {
+    x: Math.min(Math.max(16, pos.x), Math.max(16, window.innerWidth - width - 16)),
+    y: Math.min(Math.max(16, pos.y), Math.max(16, window.innerHeight - height - 16)),
+  };
 }
 
 /* ── Message bubble ───────────────────────────────────────────── */

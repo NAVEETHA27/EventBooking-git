@@ -13,10 +13,14 @@ public interface RefundRepository extends JpaRepository<Refund, Long> {
 
     List<Refund> findByPaymentId(Long paymentId);
 
-    /** All refunds for a specific user — used by /refunds/my endpoint */
+    /** All refunds for a specific user — used by /payments/refunds/my endpoint */
     @Query("""
         SELECT r FROM Refund r
-        WHERE r.payment.booking.user.id = :userId
+        JOIN FETCH r.payment p
+        JOIN FETCH p.booking b
+        JOIN FETCH b.event
+        JOIN FETCH b.user u
+        WHERE u.id = :userId
         ORDER BY r.id DESC
     """)
     List<Refund> findByUserId(@Param("userId") Long userId);

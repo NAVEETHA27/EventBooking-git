@@ -62,6 +62,21 @@ public class Booking {
     @Column(name = "qr_code_path")
     private String qrCodePath;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "attendance_status", nullable = false, length = 30)
+    @Builder.Default
+    private AttendanceStatus attendanceStatus = AttendanceStatus.NOT_ATTENDED;
+
+    @Column(name = "check_in_time")
+    private LocalDateTime checkInTime;
+
+    @Column(name = "checked_in_by")
+    private Long checkedInBy;
+
+    @Column(name = "certificate_eligible", nullable = false)
+    @Builder.Default
+    private boolean certificateEligible = false;
+
     @Column(name = "cancellation_reason", length = 500)
     private String cancellationReason;
 
@@ -93,5 +108,9 @@ public class Booking {
 
     public enum TicketStatus {
         ACTIVE, CANCELLED, EXPIRED
+    }
+
+    public enum AttendanceStatus {
+        NOT_ATTENDED, PRESENT
     }
 }

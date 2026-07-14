@@ -30,6 +30,7 @@ public class OrganizerProfileService {
     private final PasswordEncoder        passwordEncoder;
     private final AuditService           auditService;
     private final ProfileLocationService profileLocationService;
+    private final StorageService         storageService;
 
     @Transactional(readOnly = true)
     public OrganizerProfileResponse getProfile(Long organizerId) {
@@ -72,12 +73,8 @@ public class OrganizerProfileService {
     public String uploadLogo(Long organizerId, MultipartFile file) throws IOException {
         Organizer org = organizerRepository.findById(organizerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Organizer not found"));
-        String ext = getExt(file.getOriginalFilename());
-        String filename = "org_" + organizerId + "_" + UUID.randomUUID() + ext;
-        Path dir = Paths.get("uploads/logos");
-        Files.createDirectories(dir);
-        Files.copy(file.getInputStream(), dir.resolve(filename), StandardCopyOption.REPLACE_EXISTING);
-        org.setOrganizationLogo("/uploads/logos/" + filename);
+        String logoPath = storageService.store("logos", file, "org_" + organizerId);
+        org.setOrganizationLogo(logoPath);
         organizerRepository.save(org);
         auditService.record(organizerId, "ORGANIZER", "ORGANIZATION_LOGO_UPDATED", "ORGANIZER",
                 String.valueOf(organizerId), "Organization logo updated");

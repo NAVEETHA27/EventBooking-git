@@ -1,40 +1,60 @@
-# Build
+# ── Build artifacts ───────────────────────────────────────────────────────────
 /target/
 backend/target/
+backend/out/
+frontend/dist/
+frontend/build/
 
-# Dependencies
+# ── Dependencies ──────────────────────────────────────────────────────────────
 frontend/node_modules/
 
-# Build output
-frontend/dist/
-
-# Local uploads & logs
-uploads/
-logs/
-backend/uploads/
-backend/logs/
-
-# Environment & secrets — NEVER commit these
+# ── Secrets & environment — NEVER commit these ────────────────────────────────
 .env
 .env.local
 .env.production
 .env.staging
 *.env
-application-local.yml
-application-local.yaml
-application-secret.yml
-application-secret.yaml
+backend/src/main/resources/application-local.yml
+backend/src/main/resources/application-local.yaml
+backend/src/main/resources/application-secret.yml
+backend/src/main/resources/application-secret.yaml
 
-# IDE
+# ── Logs ──────────────────────────────────────────────────────────────────────
+logs/
+*.log
+backend/logs/
+frontend/vite-dev.log
+frontend/vite-dev.err.log
+
+# ── Uploaded files (runtime generated) ───────────────────────────────────────
+uploads/
+backend/uploads/
+
+# ── JVM crash / replay logs ───────────────────────────────────────────────────
+hs_err_pid*.log
+replay_pid*.log
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
 .idea/
 *.iml
+*.ipr
+*.iws
 .vscode/
 *.swp
 *.swo
+.settings/
+backend/.classpath
+backend/.project
+backend/.settings/
 
-# OS
+# ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Maven wrapper logs
+# ── Maven wrapper ─────────────────────────────────────────────────────────────
 .mvn/wrapper/maven-wrapper.jar
+
+# ── Kiro AI workspace metadata ───────────────────────────────────────────────
+.kiro/
+.agents/

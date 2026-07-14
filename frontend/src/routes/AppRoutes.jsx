@@ -33,16 +33,23 @@ export const ROUTES = {
   PAYMENTS:        '/payments',
   REFUNDS:         '/refunds',
   QUEUE_STATUS:    '/queue-status',
+  PORTFOLIO:       '/portfolio',
+  CERTIFICATES:    '/certificates',
+  NETWORKING:      '/networking',
 
   // Organizer
   ORG_DASHBOARD:   '/organizer/dashboard',
   ORG_EVENTS:      '/organizer/events',
   ORG_CREATE:      '/organizer/events/create',
   ORG_EDIT:        (id = ':id') => `/organizer/events/${id}/edit`,
+  ORG_ATTENDANCE:  (id = ':id') => `/organizer/events/${id}/attendance`,
   ORG_ATTENDEES:   '/organizer/attendees',
   ORG_PROFILE:     '/organizer/profile',
+  ORG_ANALYTICS:   '/organizer/analytics',
+  ORG_COPILOT:     '/organizer/copilot',
 
   // Admin
   ADMIN_DASHBOARD: '/admin/dashboard',
   ADMIN_APPROVALS: '/admin/approvals',
+  ADMIN_INSIGHTS:  '/admin/ai-insights',
 };

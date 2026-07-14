@@ -1,10 +1,11 @@
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from 'react-query';
-import { bookingsAPI } from '../../services/api';
+import { bookingsAPI, certificatesAPI } from '../../services/api';
 import Spinner from '../../components/common/Spinner';
 import { QRCodeSVG } from 'qrcode.react';
-import { FiArrowLeft, FiCalendar, FiCreditCard, FiMapPin, FiUsers } from 'react-icons/fi';
+import { FiArrowLeft, FiCalendar, FiCreditCard, FiMapPin, FiUsers, FiCheckCircle, FiAlertCircle, FiAward, FiDownload } from 'react-icons/fi';
 import { format } from 'date-fns';
+import { toast } from 'react-toastify';
 
 export default function BookingDetail() {
   const { id } = useParams();
@@ -22,7 +23,18 @@ export default function BookingDetail() {
   const b = data;
   const isFree = !b.totalAmount || Number(b.totalAmount) === 0;
   const inactive = b.ticketStatus === 'CANCELLED' || b.ticketStatus === 'EXPIRED' || b.bookingStatus === 'CANCELLED' || b.bookingStatus === 'EXPIRED';
+  const eventEnded = ['COMPLETED', 'EXPIRED', 'CANCELLED'].includes(b.event?.status);
   const statusText = b.ticketStatus === 'EXPIRED' || b.bookingStatus === 'EXPIRED' ? 'Ticket Expired' : b.ticketStatus === 'CANCELLED' || b.bookingStatus === 'CANCELLED' ? 'Ticket Cancelled' : b.bookingStatus;
+
+  const downloadCertificate = async () => {
+    try {
+      const res = await certificatesAPI.download(b.certificateId);
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${b.certificateId}.pdf`; a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error('Could not download certificate.'); }
+  };
 
   return (
     <div style={{ background:'#F0F4FF', minHeight:'100vh' }} className="px-4 sm:px-6 lg:px-8 py-10">
@@ -105,6 +117,73 @@ export default function BookingDetail() {
                   <div className="text-xs text-gray-500">{[p.department, p.college].filter(Boolean).join(' · ')}</div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Attendance & Certificate section */}
+          {b.bookingStatus === 'CONFIRMED' && (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 space-y-3">
+              <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wide">Attendance & Certificate</h3>
+
+              <div className="flex flex-wrap gap-2">
+                {/* Attendance status */}
+                {b.attendanceStatus === 'PRESENT' ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 border border-green-200 px-3 py-1.5 text-sm font-bold text-green-700">
+                    <FiCheckCircle className="w-4 h-4" /> Present
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-500">
+                    <FiAlertCircle className="w-4 h-4" /> Not Attended
+                  </span>
+                )}
+
+                {/* Certificate status */}
+                {b.certificateEligible && eventEnded ? (
+                  b.certificateId ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 border border-amber-200 px-3 py-1.5 text-sm font-bold text-amber-700">
+                      <FiAward className="w-4 h-4" /> Certificate Eligible
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 border border-amber-200 px-3 py-1.5 text-sm font-bold text-amber-700">
+                      <FiAward className="w-4 h-4" /> Certificate Eligible
+                    </span>
+                  )
+                ) : eventEnded && b.attendanceStatus !== 'PRESENT' ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-500">
+                    <FiAward className="w-4 h-4" /> Not Eligible
+                  </span>
+                ) : null}
+              </div>
+
+              {/* Check-in time */}
+              {b.checkInTime && (
+                <p className="text-xs text-slate-500">
+                  Checked in at <strong className="text-slate-700">{format(new Date(b.checkInTime), 'MMM d, yyyy · h:mm a')}</strong>
+                </p>
+              )}
+
+              {/* Certificate not eligible message */}
+              {eventEnded && b.attendanceStatus !== 'PRESENT' && (
+                <p className="text-xs text-slate-500 italic">
+                  You were not marked present for this event. Certificates are issued only to attendees who were scanned present.
+                </p>
+              )}
+
+              {/* Download certificate button */}
+              {b.certificateId && (
+                <button onClick={downloadCertificate}
+                  className="flex items-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white px-4 py-2.5 text-sm font-bold transition-colors">
+                  <FiDownload className="w-4 h-4" /> Download Certificate
+                </button>
+              )}
+
+              {/* Link to certificates page */}
+              {b.certificateEligible && !b.certificateId && eventEnded && (
+                <Link to="/certificates"
+                  className="flex items-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white px-4 py-2.5 text-sm font-bold transition-colors w-fit">
+                  <FiAward className="w-4 h-4" /> View Certificates
+                </Link>
+              )}
             </div>
           )}
 

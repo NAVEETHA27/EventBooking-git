@@ -52,17 +52,33 @@ public class SecurityConfig {
                     "/auth/otp/send",
                     "/auth/otp/verify",
                     "/chatbot",
-                    "/ai/chat"
+                    "/ai/chat",
+                    "/ai/copilot/chat",
+                    "/ai/events/generate-description"
                 ).permitAll()
                 .requestMatchers(HttpMethod.GET,
                     "/auth/verify-email",
                     "/auth/test-email",
+                    "/auth/session-status",
                     "/events",
                     "/events/featured",
                     "/events/categories",
                     "/help",
                     "/help/faqs",
                     "/help/videos",
+                    "/ratings/events/*/summary",
+                    "/ratings/events/*",
+                    "/recommendations/discover",
+                    "/certificates/verify/*",
+                    "/organizer/analytics/leaderboard",
+                    "/ai/search",
+                    "/ai/chat/stream",
+                    "/ai/chat/sessions",
+                    "/ai/copilot/stream",
+                    "/ai/copilot/sessions",
+                    "/ai/copilot/persona",
+                    "/ai/events/*/summary",
+                    "/ai/events/*/travel",
                     "/v3/api-docs/**",
                     "/swagger-ui/**",
                     "/swagger-ui.html"
@@ -70,6 +86,16 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/events/*").permitAll()
                 .requestMatchers("/actuator/health").permitAll()
                 .requestMatchers("/uploads/**").permitAll()
+                .requestMatchers("/uploads/voice-messages/**").permitAll()
+                .requestMatchers("/ws/**").permitAll()
+                .requestMatchers("/ws-native/**").permitAll()
+                // ── Networking (authenticated users) ───────────────────
+                .requestMatchers("/networking/**").hasRole("USER")
+                // ── AI Insights (admin) + behavior (user) ─────────────
+                .requestMatchers("/ai/insights/fraud").hasRole("ADMIN")
+                .requestMatchers("/ai/insights/platform").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.POST, "/ai/insights/behavior/**").hasRole("ADMIN")
+                .requestMatchers("/ai/insights/behavior/me").hasRole("USER")
                 // ── Organizer only ─────────────────────────────────────
                 .requestMatchers("/organizer/**").hasRole("ORGANIZER")
                 .requestMatchers("/admin/**").hasRole("ADMIN")
@@ -92,7 +118,7 @@ public class SecurityConfig {
         config.setAllowedOriginPatterns(List.of("*"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
-        config.setExposedHeaders(List.of("Authorization"));
+        config.setExposedHeaders(List.of("Authorization", "X-Token-Expiry"));
         config.setAllowCredentials(false);
         config.setMaxAge(3600L);
 

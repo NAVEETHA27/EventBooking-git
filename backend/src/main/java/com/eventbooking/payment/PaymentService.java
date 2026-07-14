@@ -15,6 +15,7 @@ import com.eventbooking.repository.PaymentRepository;
 import com.eventbooking.service.AuditService;
 import com.eventbooking.service.BookingService;
 import com.eventbooking.service.EmailService;
+import com.eventbooking.util.QrCodeGenerator;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -41,6 +42,7 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 public class PaymentService {
     private final PaymentRepository paymentRepository;
     private final BookingRepository bookingRepository;
@@ -49,6 +51,7 @@ public class PaymentService {
     private final AuditService auditService;
     private final BookingService bookingService;
     private final ObjectMapper objectMapper;
+    private final QrCodeGenerator qrCodeGenerator;
 
     @Value("${razorpay.key-id:}")
     private String razorpayKeyId;
@@ -68,6 +71,12 @@ public class PaymentService {
         Booking booking = getOwnedBooking(bookingId, userId);
         Payment payment = getPayment(bookingId);
 
+        if (booking.getBookingStatus() == Booking.BookingStatus.CANCELLED
+                || booking.getBookingStatus() == Booking.BookingStatus.EXPIRED) {
+            throw new BookingException("This booking is " + booking.getBookingStatus().name().toLowerCase()
+                    + ". Please create a new booking before paying.");
+        }
+
         if (payment.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
             markSuccessful(bookingId, userId, PaymentStatusUpdateRequest.builder()
                     .paymentMethod("FREE")
@@ -86,6 +95,10 @@ public class PaymentService {
         ensureRazorpayConfigured();
         if (payment.getPaymentStatus() == Payment.PaymentStatus.SUCCESSFUL) {
             throw new BookingException("Payment is already successful");
+        }
+        if (payment.getPaymentStatus() == Payment.PaymentStatus.REFUNDED
+                || payment.getPaymentStatus() == Payment.PaymentStatus.PARTIALLY_REFUNDED) {
+            throw new BookingException("This booking payment was refunded and cannot be paid again.");
         }
 
         int amountInPaise = payment.getAmount()
@@ -115,13 +128,15 @@ public class PaymentService {
                 String message = response.statusCode() == 401 || response.statusCode() == 403
                         ? "Razorpay rejected the configured test credentials. Check RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET."
                         : "Razorpay order creation failed. Please try again.";
-                throw new BookingException(message);
+                String details = extractGatewayError(response.body());
+                throw new BookingException(details == null ? message : message + " " + details);
             }
 
             JsonNode body = objectMapper.readTree(response.body());
             payment.setPaymentStatus(Payment.PaymentStatus.PROCESSING);
             payment.setPaymentMethod("RAZORPAY");
             payment.setGatewayOrderId(body.path("id").asText());
+            payment.setFailureReason(null);
             paymentRepository.save(payment);
             auditService.record(userId, "USER", "RAZORPAY_ORDER_CREATED", "PAYMENT",
                     String.valueOf(payment.getId()), "Razorpay order created for booking " + bookingId);
@@ -140,7 +155,7 @@ public class PaymentService {
         } catch (BookingException ex) {
             throw ex;
         } catch (Exception ex) {
-            throw new BookingException("Could not create Razorpay order. " + ex.getMessage());
+            throw new BookingException("Could not create Razorpay order. " + safeMessage(ex));
         }
     }
 
@@ -169,10 +184,13 @@ public class PaymentService {
     public PaymentResponse markProcessing(Long bookingId, Long userId, PaymentStatusUpdateRequest request) {
         Booking booking = getOwnedBooking(bookingId, userId);
         Payment payment = getPayment(bookingId);
-        if (payment.getPaymentStatus() != Payment.PaymentStatus.PENDING) {
+        if (payment.getPaymentStatus() != Payment.PaymentStatus.PENDING
+                && payment.getPaymentStatus() != Payment.PaymentStatus.FAILED
+                && payment.getPaymentStatus() != Payment.PaymentStatus.PROCESSING) {
             throw new BookingException("Payment cannot be moved to processing from " + payment.getPaymentStatus());
         }
         payment.setPaymentStatus(Payment.PaymentStatus.PROCESSING);
+        payment.setFailureReason(null);
         applyGatewayFields(payment, request);
         Payment saved = paymentRepository.save(payment);
         auditService.record(userId, "USER", "PAYMENT_PROCESSING", "PAYMENT",
@@ -184,13 +202,18 @@ public class PaymentService {
     public BookingResponse markSuccessful(Long bookingId, Long userId, PaymentStatusUpdateRequest request) {
         Booking booking = getOwnedBooking(bookingId, userId);
         Payment payment = getPayment(bookingId);
-        if (payment.getPaymentStatus() == Payment.PaymentStatus.FAILED
-                || payment.getPaymentStatus() == Payment.PaymentStatus.REFUNDED
+        if (payment.getPaymentStatus() == Payment.PaymentStatus.REFUNDED
                 || payment.getPaymentStatus() == Payment.PaymentStatus.PARTIALLY_REFUNDED) {
             throw new BookingException("Payment cannot be marked successful from " + payment.getPaymentStatus());
         }
 
         booking.setBookingStatus(Booking.BookingStatus.CONFIRMED);
+        // Generate QR only after payment confirmed
+        try {
+            booking.setQrCodePath(qrCodeGenerator.generate(booking.getTicketId()));
+        } catch (Exception ex) {
+            log.warn("QR generation failed for ticket {}: {}", booking.getTicketId(), ex.getMessage());
+        }
         payment.setPaymentStatus(Payment.PaymentStatus.SUCCESSFUL);
         applyGatewayFields(payment, request);
         if (!StringUtils.hasText(payment.getGatewayReference())) {
@@ -199,10 +222,32 @@ public class PaymentService {
         paymentRepository.save(payment);
         notificationService.sendNotification(userId, "USER", "PAYMENT_SUCCESSFUL", "Payment successful",
                 "Your payment is complete and ticket is confirmed.", "/bookings/" + bookingId);
-        emailService.sendBookingConfirmation(booking.getUser().getEmail(), booking.getUser().getName(), booking, booking.getEvent());
+
+        // Extract all data needed for email BEFORE saving/closing the transaction,
+        // using plain strings — never pass live JPA entities to @Async methods.
+        // Passing entities causes Hibernate session corruption (IllegalStateException:
+        // Illegal pop() with non-matching JdbcValuesSourceProcessingState).
+        String userEmail   = booking.getUser().getEmail();
+        String userName    = booking.getUser().getName();
+        String ticketId    = booking.getTicketId();
+        int    quantity    = booking.getQuantity();
+        double totalAmt    = booking.getTotalAmount().doubleValue();
+        String eventName   = booking.getEvent().getEventName();
+        String eventDate   = booking.getEvent().getEventDate() != null ? booking.getEvent().getEventDate().toString() : "";
+        String eventTime   = booking.getEvent().getEventTime() != null ? booking.getEvent().getEventTime().toString() : "";
+        String venue       = booking.getEvent().getVenueName() != null
+                             ? booking.getEvent().getVenueName()
+                             : (booking.getEvent().getLocation() != null ? booking.getEvent().getLocation() : "");
+
         auditService.record(userId, "USER", "PAYMENT_SUCCESSFUL", "PAYMENT",
                 String.valueOf(payment.getId()), "Payment completed for booking " + bookingId);
-        return bookingService.toResponse(bookingRepository.save(booking));
+        Booking saved = bookingRepository.save(booking);
+
+        // Send email after transaction data is captured — safe to call async now
+        emailService.sendBookingConfirmationDetached(userEmail, userName, ticketId, quantity, totalAmt,
+                eventName, eventDate, eventTime, venue);
+
+        return bookingService.toResponse(saved);
     }
 
     @Transactional
@@ -270,6 +315,23 @@ public class PaymentService {
         if (StringUtils.hasText(request.getGatewayTransactionId())) {
             payment.setGatewayReference(StringUtils.trimWhitespace(request.getGatewayTransactionId()));
         }
+    }
+
+    private String extractGatewayError(String body) {
+        try {
+            JsonNode error = objectMapper.readTree(body).path("error");
+            String description = error.path("description").asText(null);
+            if (StringUtils.hasText(description)) {
+                return description;
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private String safeMessage(Exception ex) {
+        String message = ex.getMessage();
+        return StringUtils.hasText(message) ? message : "Please check the payment configuration and try again.";
     }
 
     private void ensureRazorpayConfigured() {

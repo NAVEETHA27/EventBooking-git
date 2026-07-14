@@ -3,6 +3,7 @@ package com.eventbooking.dto.response;
 import com.eventbooking.entity.User;
 import lombok.*;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 /** Safe DTO — never exposes passwordHash or lazy collections. */
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
@@ -23,6 +24,7 @@ public class UserProfileResponse {
     private String  profilePicture;
     private boolean emailVerified;
     private String  role;
+    private LocalDateTime createdAt;
 
     public static UserProfileResponse from(User u) {
         return UserProfileResponse.builder()
@@ -32,6 +34,7 @@ public class UserProfileResponse {
                 .gender(u.getGender())
                 .dateOfBirth(u.getDateOfBirth()).profilePicture(u.getProfilePicture())
                 .emailVerified(u.isEmailVerified()).role(u.getRole().name())
+                .createdAt(u.getCreatedAt())
                 .build();
     }
 }

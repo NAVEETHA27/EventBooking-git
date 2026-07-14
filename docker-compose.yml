@@ -30,6 +30,26 @@ services:
       timeout: 5s
       retries: 5
 
+  pgvector:
+    image: pgvector/pgvector:pg16
+    container_name: eventbooking-pgvector
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${VECTOR_DB_NAME:-eventgpt_vectors}
+      POSTGRES_USER: ${VECTOR_DB_USERNAME:-eventgpt}
+      POSTGRES_PASSWORD: ${VECTOR_DB_PASSWORD:-eventgpt}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgvector_data:/var/lib/postgresql/data
+      - ./backend/sql/pgvector_schema.sql:/docker-entrypoint-initdb.d/01_pgvector_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${VECTOR_DB_USERNAME:-eventgpt} -d ${VECTOR_DB_NAME:-eventgpt_vectors}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   mysql_data:
   mongo_data:
+  pgvector_data:

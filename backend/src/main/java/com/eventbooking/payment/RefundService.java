@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -32,16 +33,36 @@ public class RefundService {
     }
 
     public RefundResponse toResponse(Refund refund) {
-        LocalDate expected = refund.getRefundDate() == null
-                ? LocalDate.now().plusDays(7)
-                : refund.getRefundDate().toLocalDate().plusDays(7);
+        // Use creation date if available, otherwise current time
+        LocalDateTime refundDate = refund.getRefundDate() != null
+                ? refund.getRefundDate()
+                : java.time.LocalDateTime.now();
+        LocalDate expected = refundDate.toLocalDate().plusDays(7);
+
+        // Safely navigate lazy associations
+        String eventName = null;
+        String transactionRef = null;
+        try {
+            if (refund.getPayment() != null) {
+                transactionRef = refund.getPayment().getTransactionId();
+                if (refund.getPayment().getBooking() != null
+                        && refund.getPayment().getBooking().getEvent() != null) {
+                    eventName = refund.getPayment().getBooking().getEvent().getEventName();
+                }
+            }
+        } catch (Exception ignored) {}
+
         return RefundResponse.builder()
                 .id(refund.getId())
+                .refundId(refund.getRefundReference())
                 .amount(refund.getRefundAmount())
                 .status(refund.getRefundStatus())
+                .eventName(eventName)
+                .requestedAt(refundDate)
                 .expectedRefundDate(expected)
-                .acknowledgement("Refunds generally take 3-7 working days depending on your payment provider.")
+                .acknowledgement("Refunds generally take 3–7 business days depending on your payment provider.")
                 .reason(refund.getReason())
+                .transactionRef(transactionRef)
                 .build();
     }
 

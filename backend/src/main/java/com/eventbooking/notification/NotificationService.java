@@ -92,29 +92,55 @@ public class NotificationService {
 
     public Page<Notification> getNotifications(Long recipientId, String recipientType,
                                                 int page, int size) {
-        return notificationRepository
-            .map(repo -> repo.findByRecipientIdAndRecipientTypeOrderByCreatedAtDesc(
-                    recipientId, recipientType, PageRequest.of(page, size)))
-            .orElse(Page.empty());
+        int safePage = Math.max(page, 0);
+        int safeSize = Math.min(Math.max(size, 1), 100);
+        Pageable pageable = PageRequest.of(safePage, safeSize);
+        if (notificationRepository.isEmpty()) {
+            return Page.empty(pageable);
+        }
+        try {
+            return notificationRepository.get()
+                    .findByRecipientIdAndRecipientTypeOrderByCreatedAtDesc(
+                            recipientId, recipientType, pageable);
+        } catch (Exception ex) {
+            log.warn("[Notification] MongoDB read failed for recipient {}:{}; returning empty page: {}",
+                    recipientType, recipientId, ex.getMessage());
+            return new PageImpl<>(List.of(), pageable, 0);
+        }
     }
 
     public long getUnreadCount(Long recipientId, String recipientType) {
-        return notificationRepository
-            .map(repo -> repo.countByRecipientIdAndRecipientTypeAndReadFalse(recipientId, recipientType))
-            .orElse(0L);
+        if (notificationRepository.isEmpty()) {
+            return 0L;
+        }
+        try {
+            return notificationRepository.get()
+                    .countByRecipientIdAndRecipientTypeAndReadFalse(recipientId, recipientType);
+        } catch (Exception ex) {
+            log.warn("[Notification] MongoDB unread-count failed for recipient {}:{}; returning 0: {}",
+                    recipientType, recipientId, ex.getMessage());
+            return 0L;
+        }
     }
 
     public void markAllRead(Long recipientId, String recipientType) {
-        notificationRepository.ifPresent(repo -> {
-            Pageable all = PageRequest.of(0, Integer.MAX_VALUE);
-            repo.findByRecipientIdAndRecipientTypeOrderByCreatedAtDesc(recipientId, recipientType, all)
-                .getContent()
-                .forEach(n -> {
-                    n.setRead(true);
-                    n.setReadAt(LocalDateTime.now());
-                    repo.save(n);
-                });
-        });
+        if (notificationRepository.isEmpty()) {
+            return;
+        }
+        try {
+            Pageable batch = PageRequest.of(0, 500);
+            notificationRepository.get()
+                    .findByRecipientIdAndRecipientTypeOrderByCreatedAtDesc(recipientId, recipientType, batch)
+                    .getContent()
+                    .forEach(n -> {
+                        n.setRead(true);
+                        n.setReadAt(LocalDateTime.now());
+                        notificationRepository.get().save(n);
+                    });
+        } catch (Exception ex) {
+            log.warn("[Notification] MongoDB mark-all-read failed for recipient {}:{}: {}",
+                    recipientType, recipientId, ex.getMessage());
+        }
     }
 
     // ── SSE Stream ────────────────────────────────────────────────────────

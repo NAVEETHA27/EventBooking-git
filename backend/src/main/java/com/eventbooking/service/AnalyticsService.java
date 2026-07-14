@@ -42,8 +42,7 @@ public class AnalyticsService {
         Map<String, Object> dashboard = new HashMap<>();
 
         // Total events
-        long totalEvents = eventRepository.findByOrganizerId(organizerId,
-                org.springframework.data.domain.PageRequest.of(0, Integer.MAX_VALUE)).getTotalElements();
+        long totalEvents = eventRepository.countByOrganizerId(organizerId);
         dashboard.put("totalEvents", totalEvents);
 
         // Total revenue
@@ -52,9 +51,16 @@ public class AnalyticsService {
 
         // Analytics data last 30 days
         LocalDate from = LocalDate.now().minusDays(30);
-        List<AnalyticsData> analyticsData = analyticsRepository
-                .map(repo -> repo.findByOrganizerIdAndDateBetween(organizerId, from, LocalDate.now()))
-                .orElseGet(List::of);
+        // Analytics data last 30 days — skip if MongoDB is unavailable
+        List<AnalyticsData> analyticsData = List.of();
+        if (analyticsRepository.isPresent()) {
+            try {
+                analyticsData = analyticsRepository.get()
+                        .findByOrganizerIdAndDateBetween(organizerId, from, LocalDate.now());
+            } catch (Exception ex) {
+                log.debug("[AnalyticsService] MongoDB unavailable, skipping analytics chart data: {}", ex.getMessage());
+            }
+        }
         dashboard.put("analyticsLast30Days", analyticsData);
 
         return dashboard;

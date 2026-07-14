@@ -11,6 +11,8 @@ public class AIChatRequest {
     @Size(max = 1200, message = "Message is too long")
     private String message;
 
+    private String sessionId;
+
     @Builder.Default
     private List<ChatMessage> history = new ArrayList<>();
 

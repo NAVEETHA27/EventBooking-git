@@ -6,13 +6,19 @@ server:
 spring:
   application:
     name: event-booking-system
+  config:
+    import:
+      - optional:file:../.env[.properties]
+      - optional:file:.env[.properties]
+  autoconfigure:
+    exclude:
+      - org.springframework.ai.autoconfigure.openai.OpenAiAutoConfiguration
 
   # ── MySQL ─────────────────────────────────────────────────────────────────
   datasource:
     url: jdbc:mysql://localhost:3306/event_booking_db?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
-    username: root
-    # Set DB_PASSWORD env var in production; local profile overrides this.
-    password: ${DB_PASSWORD:@navii27}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       maximum-pool-size: 10
@@ -35,6 +41,11 @@ spring:
     mongodb:
       uri: ${MONGODB_URI:mongodb://localhost:27017/event_booking_logs}
       auto-index-creation: false
+      # Fast-fail timeout — prevents 30 s hang when MongoDB is not running.
+      # MongoHealthConfig also sets this via MongoClientSettingsBuilderCustomizer
+      # but this YAML property covers drivers that read it directly.
+      server-selection-timeout: 2000ms
+      connect-timeout: 2000ms
 
   # ── Mail (SMTP) ───────────────────────────────────────────────────────────
   mail:
@@ -61,6 +72,16 @@ spring:
       max-file-size: 10MB
       max-request-size: 10MB
 
+  # ── Spring AI Config ──────────────────────────────────────────────────────
+  ai:
+    google:
+      genai:
+        api-key: ${GEMINI_API_KEY:}
+        chat:
+          options:
+            model: ${GEMINI_MODEL:gemini-2.5-flash}
+
+
 # ── MongoDB feature flag ──────────────────────────────────────────────────
 mongodb:
   enabled: ${MONGODB_ENABLED:false}
@@ -69,8 +90,8 @@ mongodb:
 jwt:
   # Minimum 32 chars required by JJWT. Override via JWT_SECRET env var or local profile.
   secret: ${JWT_SECRET:this-is-a-safe-default-key-for-dev-only-not-for-prod}
-  expiration: 900000
-  refresh-expiration: 604800000
+  expiration: 3600000          # 1 hour — session auto-expires after 1 hour of inactivity
+  refresh-expiration: 604800000 # 7 days — silent renewal window
   issuer: college-events
 
 # ── Razorpay ──────────────────────────────────────────────────────────────
@@ -89,14 +110,30 @@ app:
 
 # ── AI Providers ──────────────────────────────────────────────────────────
 ai:
-  provider: ${AI_PROVIDER:openai}
-  openai:
-    api-key: ${OPENAI_API_KEY:}
-    model: ${OPENAI_MODEL:gpt-4o-mini}
-    endpoint: ${OPENAI_ENDPOINT:https://api.openai.com/v1/chat/completions}
+  provider: ${AI_PROVIDER:gemini}
+
   gemini:
-    api-key: ${GEMINI_API_KEY:}
-    model: ${GEMINI_MODEL:gemini-1.5-flash}
+    api-key: ${SPRING_AI_GEMINI_API_KEY:${GEMINI_API_KEY:}}
+    model: ${SPRING_AI_CHAT_MODEL:${GEMINI_MODEL:gemini-2.5-flash}}
+  # Feature flags — set false to skip AI API calls and save credits
+  features:
+    recommendations: ${AI_RECOMMENDATIONS:true}
+    sentiment: ${AI_SENTIMENT:true}
+    portfolio-summary: ${AI_PORTFOLIO:true}
+    event-summary: ${AI_EVENT_SUMMARY:true}
+    description-generator: ${AI_DESCRIPTION_GEN:true}
+    career-guidance: ${AI_CAREER_GUIDANCE:true}
+    nlp-search: ${AI_NLP_SEARCH:true}
+
+eventgpt:
+  chat-model: ${SPRING_AI_CHAT_MODEL:gemini-2.5-flash}
+  max-history-messages: ${EVENTGPT_MAX_HISTORY_MESSAGES:20}
+  max-context-documents: ${EVENTGPT_MAX_CONTEXT_DOCUMENTS:12}
+  vector-db:
+    provider: ${VECTOR_DB_PROVIDER:mysql}
+    url: ${VECTOR_DB_URL:}
+    username: ${VECTOR_DB_USERNAME:}
+    password: ${VECTOR_DB_PASSWORD:}
 
 # ── Logging ───────────────────────────────────────────────────────────────
 logging:
@@ -104,9 +141,9 @@ logging:
     com.eventbooking: DEBUG
     org.springframework.security: INFO
     org.hibernate.SQL: INFO
-    org.mongodb.driver.cluster: WARN
-    org.mongodb.driver.connection: WARN
-    org.mongodb.driver: WARN
+    org.mongodb.driver.cluster: ERROR
+    org.mongodb.driver.connection: ERROR
+    org.mongodb.driver: ERROR
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
   file:
