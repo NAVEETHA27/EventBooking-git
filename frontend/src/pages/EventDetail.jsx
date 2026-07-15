@@ -52,7 +52,9 @@ export default function EventDetail() {
   ) ?? false;
   const isOrganizer = user?.role === 'ORGANIZER';
   const isAdmin = user?.role === 'ADMIN';
-  const canAccessChat = isOrganizer || isAdmin || hasConfirmedBooking;
+  // Organizer can always access chat for events they own; admin can access all; users need a booking
+  const canAccessChat = isAdmin || hasConfirmedBooking ||
+    (isOrganizer && data?.organizer?.id != null && String(data?.organizer?.id) === String(user?.id));
 
   const aiMutation = useMutation(
     (question) => eventsAPI.eventQa(id, question).then(r => r.data?.data),
