@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useDragControls } from 'framer-motion';
 import { networkingAPI, directChatAPI } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import Spinner from '../../components/common/Spinner';
@@ -386,12 +386,13 @@ export default function Networking() {
 // ── Chat Window ───────────────────────────────────────────────────────────────
 function ChatWindow({ otherId, otherName, onClose }) {
   const { user } = useAuth();
+  const dragControls = useDragControls();
   const [input, setInput]         = useState('');
   const [lastId, setLastId]       = useState(0);
   const [messages, setMessages]   = useState([]);
   const [online, setOnline]       = useState(false);
-  const [typing, setTyping]       = useState(false);
   const [editing, setEditing]     = useState(null);
+  const [activeMenuId, setActiveMenuId] = useState(null);
   const [recording, setRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState(null);
   const [audioDuration, setAudioDuration]   = useState(0);
@@ -400,7 +401,6 @@ function ChatWindow({ otherId, otherName, onClose }) {
   const mediaRef     = useRef(null);
   const chunksRef    = useRef([]);
   const timerRef     = useRef(null);
-  const typingTimerRef = useRef(null);
 
   const mergeMessages = (incoming) => {
     setMessages(prev => {
@@ -499,7 +499,7 @@ function ChatWindow({ otherId, otherName, onClose }) {
       return directChatAPI.sendVoice(otherId, form);
     },
     {
-      onSuccess: () => {
+      onSuccess: (res) => {
         setAudioBlob(null);
         setAudioPreviewUrl(null);
         setAudioDuration(0);
@@ -525,11 +525,13 @@ function ChatWindow({ otherId, otherName, onClose }) {
         setRecording(false);
         clearInterval(timerRef.current);
       };
+      mr.onstart = () => {
+        setRecording(true);
+        setAudioDuration(0);
+        timerRef.current = setInterval(() => setAudioDuration(d => d + 1), 1000);
+      };
       mr.start();
       mediaRef.current = mr;
-      setRecording(true);
-      setAudioDuration(0);
-      timerRef.current = setInterval(() => setAudioDuration(d => d + 1), 1000);
     } catch {
       toast.error('Microphone access denied');
     }
@@ -546,16 +548,20 @@ function ChatWindow({ otherId, otherName, onClose }) {
   };
 
   const send = () => { if (input.trim() && !sendMut.isLoading) sendMut.mutate(); };
+
   const deleteForMe = async (id) => {
     try {
       await directChatAPI.deleteForMe(id);
       setMessages(prev => prev.filter(m => m.id !== id));
+      setActiveMenuId(null);
     } catch (e) { toast.error(e?.response?.data?.message || 'Could not delete message'); }
   };
+
   const unsend = async (id) => {
     try {
       const res = await directChatAPI.unsend(id);
       mergeMessages([res.data?.data]);
+      setActiveMenuId(null);
     } catch (e) { toast.error(e?.response?.data?.message || 'Could not unsend message'); }
   };
 
@@ -567,11 +573,21 @@ function ChatWindow({ otherId, otherName, onClose }) {
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95, y: 20 }}
       transition={{ duration: 0.18 }}
+      drag
+      dragControls={dragControls}
+      dragListener={false}
+      dragMomentum={false}
       className="fixed bottom-6 right-6 z-50 flex flex-col w-[360px] h-[520px] bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden"
     >
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-teal-600 to-teal-700 text-white shrink-0">
-        <button onClick={onClose} className="text-white/70 hover:text-white transition-colors">
+      <div
+        onPointerDown={(e) => dragControls.start(e)}
+        className="cursor-grab active:cursor-grabbing flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-teal-600 to-teal-700 text-white shrink-0 select-none"
+      >
+        <button
+          onClick={onClose}
+          onPointerDown={(e) => e.stopPropagation()}
+          className="text-white/70 hover:text-white transition-colors"
+        >
           <FiArrowLeft className="h-4 w-4" />
         </button>
         <div className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center font-bold text-sm shrink-0">
@@ -593,23 +609,89 @@ function ChatWindow({ otherId, otherName, onClose }) {
             <p className="text-xs mt-1">Say hi! 👋</p>
           </div>
         )}
-        {history.map(msg => {
-          const isMine = msg.senderId !== otherId;
+        {messages.map(msg => {
+          const isMine = String(msg.senderId) === String(user?.id);
+          const isUnsent = msg.deletedForEveryone || msg.deleted;
+          const isVoice = msg.messageType === 'VOICE';
+
           return (
-            <div key={msg.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[78%] rounded-2xl px-3 py-2 text-sm shadow-sm ${
-                isMine ? 'bg-teal-600 text-white rounded-br-sm' : 'bg-white border border-slate-200 text-slate-800 rounded-bl-sm'
-              }`}>
-                {msg.messageType === 'VOICE' ? (
+            <div key={msg.id} className="group relative flex items-center mb-2 w-full justify-between" style={{ justifyContent: isMine ? 'flex-end' : 'flex-start' }}>
+              
+              {/* Mine Left Actions */}
+              {isMine && !isUnsent && (
+                <div className={`mr-2 flex items-center gap-1 transition-opacity duration-150 ${
+                  activeMenuId === msg.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                }`}>
+                  <button
+                    onClick={() => deleteForMe(msg.id)}
+                    className="p-1 rounded bg-slate-200/80 hover:bg-red-50 text-slate-500 hover:text-red-600 transition-colors shadow-sm"
+                    title="Delete for me"
+                  >
+                    <FiTrash2 className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => unsend(msg.id)}
+                    className="p-1 rounded bg-slate-200/80 hover:bg-red-50 text-slate-500 hover:text-red-600 transition-colors shadow-sm"
+                    title="Unsend"
+                  >
+                    <FiRotateCcw className="h-3.5 w-3.5" />
+                  </button>
+                  {!isVoice && (
+                    <button
+                      onClick={() => { setEditing(msg); setInput(msg.content); }}
+                      className="p-1 rounded bg-slate-200/80 hover:bg-teal-50 text-slate-500 hover:text-teal-600 transition-colors shadow-sm"
+                      title="Edit"
+                    >
+                      <FiEdit2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Message Bubble */}
+              <div
+                onClick={() => setActiveMenuId(activeMenuId === msg.id ? null : msg.id)}
+                className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm shadow-sm transition-colors cursor-pointer ${
+                  isMine
+                    ? isUnsent
+                      ? 'bg-slate-200 text-slate-500 italic rounded-br-sm'
+                      : 'bg-teal-600 text-white rounded-br-sm'
+                    : isUnsent
+                      ? 'bg-slate-100 border border-slate-200 text-slate-400 italic rounded-bl-sm'
+                      : 'bg-white border border-slate-200 text-slate-800 rounded-bl-sm'
+                }`}
+              >
+                {isUnsent ? (
+                  <span className="text-xs">This message was unsent</span>
+                ) : isVoice ? (
                   <VoicePlayer url={msg.voiceUrl} duration={msg.voiceDurationSeconds} mine={isMine} />
                 ) : (
                   <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                 )}
-                <p className={`text-[10px] mt-1 flex items-center justify-end gap-1 ${isMine ? 'text-teal-200' : 'text-slate-400'}`}>
+                <p className={`text-[9px] mt-1 flex items-center justify-end gap-1 ${
+                  isMine ? (isUnsent ? 'text-slate-400' : 'text-teal-200') : 'text-slate-400'
+                }`}>
                   {msg.sentAt ? new Date(msg.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                  {isMine && <span>{msg.read ? '✓✓' : '✓'}</span>}
+                  {isMine && !isUnsent && <span>{msg.read ? '✓✓' : '✓'}</span>}
+                  {msg.edited && !isUnsent && <span className="italic text-[7px] opacity-75">(edited)</span>}
                 </p>
               </div>
+
+              {/* Others Right Actions */}
+              {!isMine && !isUnsent && (
+                <div className={`ml-2 flex items-center gap-1 transition-opacity duration-150 ${
+                  activeMenuId === msg.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                }`}>
+                  <button
+                    onClick={() => deleteForMe(msg.id)}
+                    className="p-1 rounded bg-slate-200/80 hover:bg-red-50 text-slate-500 hover:text-red-600 transition-colors shadow-sm"
+                    title="Delete for me"
+                  >
+                    <FiTrash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+
             </div>
           );
         })}

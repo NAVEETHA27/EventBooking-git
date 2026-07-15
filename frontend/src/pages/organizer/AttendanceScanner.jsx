@@ -8,7 +8,7 @@ import Spinner from '../../components/common/Spinner';
 import QueryError from '../../components/common/QueryError';
 import {
   FiCamera, FiUpload, FiCheckCircle, FiAlertCircle, FiUsers,
-  FiWifi, FiWifiOff, FiLink, FiCopy, FiSmartphone, FiRefreshCw,
+  FiWifi, FiWifiOff, FiLink, FiCopy, FiSmartphone, FiRefreshCw, FiBluetooth,
 } from 'react-icons/fi';
 
 // ── External Scanner WebSocket URL ──────────────────────────────────────────
@@ -45,6 +45,11 @@ export default function AttendanceScanner() {
   const [extSessionId,    setExtSessionId]    = useState(() => Math.random().toString(36).slice(2, 10).toUpperCase());
   const [extShowPanel,    setExtShowPanel]    = useState(false);
   const [extLastDevice,   setExtLastDevice]   = useState('');
+
+  // ── bluetooth scanner state ──────────────────────────────────────────────
+  const [bluetoothDevice, setBluetoothDevice] = useState(null);
+  const [bluetoothConnected, setBluetoothConnected] = useState(false);
+  const [btScanning, setBtScanning] = useState(false);
 
   // ── queries ──────────────────────────────────────────────────────────────
   const statsQuery = useQuery(
@@ -289,6 +294,80 @@ export default function AttendanceScanner() {
 
   useEffect(() => () => disconnectExternalScanner(), []);
 
+  // ── bluetooth scanner connection ─────────────────────────────────────────
+  const onBluetoothDisconnected = useCallback(() => {
+    setBluetoothConnected(false);
+    setBluetoothDevice(null);
+    toast.warn('Bluetooth Scanner Disconnected');
+  }, []);
+
+  const connectBluetoothScanner = async () => {
+    if (!navigator.bluetooth) {
+      toast.error('Web Bluetooth is not supported by your browser. Use Google Chrome or Microsoft Edge.');
+      return;
+    }
+    try {
+      setBtScanning(true);
+      const device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: ['generic_access', 0x1812, 'battery_service']
+      });
+
+      setBluetoothDevice(device);
+      const server = await device.gatt.connect();
+      setBluetoothConnected(true);
+      toast.success(`Bluetooth Scanner Connected: ${device.name || 'Device'}`);
+
+      device.addEventListener('gattserverdisconnected', onBluetoothDisconnected);
+
+      try {
+        const services = await server.getPrimaryServices();
+        for (const service of services) {
+          const characteristics = await service.getCharacteristics();
+          for (const char of characteristics) {
+            if (char.properties.notify) {
+              await char.startNotifications();
+              char.addEventListener('characteristicvaluechanged', (e) => {
+                const value = e.target.value;
+                const decoder = new TextDecoder('utf-8');
+                const text = decoder.decode(value).trim();
+                if (text) {
+                  autoMark(text);
+                  toast.info(`Scanned via Bluetooth: ${text}`);
+                }
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Could not subscribe to BLE GATT notifications, keyboard mode might still work.', err);
+      }
+    } catch (err) {
+      console.error(err);
+      if (err.name !== 'NotFoundError') {
+        toast.error(`Bluetooth Error: ${err.message}`);
+      }
+    } finally {
+      setBtScanning(false);
+    }
+  };
+
+  const disconnectBluetoothScanner = useCallback(() => {
+    if (bluetoothDevice && bluetoothDevice.gatt.connected) {
+      bluetoothDevice.gatt.disconnect();
+    }
+    setBluetoothConnected(false);
+    setBluetoothDevice(null);
+  }, [bluetoothDevice]);
+
+  useEffect(() => {
+    return () => {
+      if (bluetoothDevice && bluetoothDevice.gatt.connected) {
+        bluetoothDevice.gatt.disconnect();
+      }
+    };
+  }, [bluetoothDevice]);
+
   // ── Scanner relay URL for mobile device ──────────────────────────────────
   const relayUrl = `${window.location.origin}/scanner-relay?event=${eventId}&session=${extSessionId}&token=${encodeURIComponent(localStorage.getItem('eb_token') || '')}`;
 
@@ -318,14 +397,30 @@ export default function AttendanceScanner() {
               QR codes are marked automatically on scan — no button click needed.
             </p>
           </div>
-          {/* External Scanner toggle */}
-          <button
-            onClick={() => setExtShowPanel(v => !v)}
-            className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-bold transition-all ${extConnected ? 'border-green-300 bg-green-50 text-green-700' : 'border-blue-200 bg-white text-blue-700 hover:bg-blue-50'}`}
-          >
-            {extConnected ? <FiWifi className="w-4 h-4" /> : <FiSmartphone className="w-4 h-4" />}
-            {extConnected ? 'Scanner Connected' : 'Connect External Scanner'}
-          </button>
+          <div className="flex gap-2">
+            {/* Bluetooth Scanner Button */}
+            <button
+              onClick={bluetoothConnected ? disconnectBluetoothScanner : connectBluetoothScanner}
+              disabled={btScanning}
+              className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-bold transition-all ${
+                bluetoothConnected 
+                  ? 'border-emerald-300 bg-emerald-50 text-emerald-700' 
+                  : 'border-blue-200 bg-white text-blue-700 hover:bg-blue-50'
+              }`}
+            >
+              <FiBluetooth className={`w-4 h-4 ${btScanning ? 'animate-pulse text-blue-600' : ''}`} />
+              {btScanning ? 'Searching...' : bluetoothConnected ? `Bluetooth Connected` : 'Connect Bluetooth Scanner'}
+            </button>
+
+            {/* External Scanner toggle */}
+            <button
+              onClick={() => setExtShowPanel(v => !v)}
+              className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-bold transition-all ${extConnected ? 'border-green-300 bg-green-50 text-green-700' : 'border-blue-200 bg-white text-blue-700 hover:bg-blue-50'}`}
+            >
+              {extConnected ? <FiWifi className="w-4 h-4" /> : <FiSmartphone className="w-4 h-4" />}
+              {extConnected ? 'Scanner Connected' : 'Connect External Scanner'}
+            </button>
+          </div>
         </div>
 
         {/* External scanner panel */}
