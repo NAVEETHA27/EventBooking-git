@@ -7,6 +7,7 @@ import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -24,6 +25,8 @@ public class MockDataSeeder {
     private static final String MOCK_EMAIL = "mock.organizer@collegeevents.local";
     private static final String MOCK_TAG   = "MOCK_SEED_2026";
     private static final String USER_EMAIL = "demo.student@collegeevents.local";
+    private static final String DEMO_PASSWORD = "Password@123";
+    private static final String LEGACY_FAKE_HASH = "$2a$10$mockseedpasswordhashforlocaldataonly";
 
     private final OrganizerRepository   organizerRepository;
     private final EventRepository       eventRepository;
@@ -34,6 +37,7 @@ public class MockDataSeeder {
     private final CertificateRepository certificateRepository;
     private final PaymentRepository     paymentRepository;
     private final RefundRepository      refundRepository;
+    private final PasswordEncoder       passwordEncoder;
 
     @Bean
     CommandLineRunner seedMockEvents() {
@@ -48,11 +52,12 @@ public class MockDataSeeder {
                         .organizerName("Campus Events Office")
                         .organizationName("NovaTech Institute")
                         .email(MOCK_EMAIL)
-                        .passwordHash("$2a$10$mockseedpasswordhashforlocaldataonly")
+                        .passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
                         .phone("9876543210").city("Chennai").state("Tamil Nadu").country("India")
                         .emailVerified(true).approved(true)
                         .role(Organizer.OrganizerRole.ORGANIZER).build()));
         organizer.setOrganizationName("NovaTech Institute");
+        repairLegacyPasswordHash(organizer);
         organizerRepository.save(organizer);
         eventRepository.clearRemovedFacilityFlags();
 
@@ -62,10 +67,11 @@ public class MockDataSeeder {
                         .userCode("USRDEMO")
                         .name("Demo Student")
                         .email(USER_EMAIL)
-                        .passwordHash("$2a$10$mockseedpasswordhashforlocaldataonly")
+                        .passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
                         .organizationName("NovaTech Institute")
                         .city("Chennai").emailVerified(true)
                         .role(User.UserRole.USER).build()));
+        repairLegacyPasswordHash(demoUser);
 
         mockEvents(organizer, LocalDate.now()).stream()
                 .filter(event -> !eventRepository.existsByEventName(event.getEventName()))
@@ -199,6 +205,20 @@ public class MockDataSeeder {
                 .tags(tags + "," + MOCK_TAG)
                 .organizerDetails("Organization type: College")
                 .build();
+    }
+
+    private void repairLegacyPasswordHash(User user) {
+        if (LEGACY_FAKE_HASH.equals(user.getPasswordHash())) {
+            user.setPasswordHash(passwordEncoder.encode(DEMO_PASSWORD));
+            userRepository.save(user);
+        }
+    }
+
+    private void repairLegacyPasswordHash(Organizer organizer) {
+        if (LEGACY_FAKE_HASH.equals(organizer.getPasswordHash())) {
+            organizer.setPasswordHash(passwordEncoder.encode(DEMO_PASSWORD));
+            organizerRepository.save(organizer);
+        }
     }
 
     private void seedComprehensiveMockEvents(Organizer organizer) {

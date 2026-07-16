@@ -46,7 +46,7 @@ public class AuthService {
     @Transactional
     public AuthResponse registerUser(UserRegisterRequest request) {
         // Sanitise inputs — strip leading/trailing whitespace (Req 9.1)
-        String email = StringUtils.trimWhitespace(request.getEmail());
+        String email = normalizeEmail(request.getEmail());
         String name  = StringUtils.trimWhitespace(request.getName());
 
         if (userRepository.existsByEmail(email)) {
@@ -93,7 +93,8 @@ public class AuthService {
 
     @Transactional
     public AuthResponse loginUser(LoginRequest request) {
-        User user = userRepository.findByEmail(request.getEmail())
+        String email = normalizeEmail(request.getEmail());
+        User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new InvalidCredentialsException("Invalid Credentials"));
 
         if (user.isAccountLocked()) {
@@ -126,8 +127,9 @@ public class AuthService {
 
     @Transactional
     public AuthResponse registerOrganizer(OrganizerRegisterRequest request) {
-        if (organizerRepository.existsByEmail(request.getEmail())) {
-            throw new DuplicateResourceException("Organizer Already Exists with email: " + request.getEmail());
+        String email = normalizeEmail(request.getEmail());
+        if (organizerRepository.existsByEmail(email)) {
+            throw new DuplicateResourceException("Organizer Already Exists with email: " + email);
         }
 
         String verificationToken = UUID.randomUUID().toString();
@@ -135,7 +137,7 @@ public class AuthService {
         Organizer organizer = Organizer.builder()
                 .organizerName(request.getOrganizerName())
                 .organizationName(request.getOrganizationName())
-                .email(request.getEmail())
+                .email(email)
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
                 .phone(request.getPhone())
                 .address(request.getAddress())
@@ -170,7 +172,8 @@ public class AuthService {
 
     @Transactional
     public AuthResponse loginOrganizer(LoginRequest request) {
-        Organizer organizer = organizerRepository.findByEmail(request.getEmail())
+        String email = normalizeEmail(request.getEmail());
+        Organizer organizer = organizerRepository.findByEmail(email)
                 .orElseThrow(() -> new InvalidCredentialsException("Invalid Credentials"));
 
         if (!passwordEncoder.matches(request.getPassword(), organizer.getPasswordHash())) {
@@ -349,5 +352,10 @@ public class AuthService {
                 .longitude(request.getLongitude())
                 .build();
         profileLocationRepository.save(location);
+    }
+
+    private String normalizeEmail(String email) {
+        String trimmed = StringUtils.trimWhitespace(email);
+        return trimmed == null ? null : trimmed.toLowerCase();
     }
 }
